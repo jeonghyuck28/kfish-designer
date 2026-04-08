@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>K·FISH 시안 생성기</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/template.css">
+    <script src="node_modules/html2canvas/dist/html2canvas.min.js"></script>
+</head>
+<body>
+<div class="layout">
+
+    <!-- ===== 좌측: 편집 영역 ===== -->
+    <main class="editor">
+
+        <!-- 상단 툴바 -->
+        <div class="editor-toolbar">
+            <div class="toolbar-left">
+                <h1 class="editor-title">K·FISH 시안 생성기</h1>
+                <div class="toolbar-tabs">
+                    <button class="toolbar-tab active" data-tab="editor" onclick="App.switchTab('editor')">입력</button>
+                    <button class="toolbar-tab" data-tab="preview" onclick="App.switchTab('preview')">미리보기</button>
+                </div>
+            </div>
+            <div class="toolbar-actions">
+                <button class="tbtn tbtn--save" onclick="App.saveProject()">저장</button>
+                <button class="tbtn tbtn--img" onclick="App.downloadImage()">이미지 다운로드</button>
+                <a class="tbtn tbtn--backup" href="/api/backup">DB 백업</a>
+            </div>
+        </div>
+
+        <!-- 편집 폼 스크롤 영역 -->
+        <div class="editor-panel active" id="panel-editor">
+
+        <!-- 섹션 트래커 -->
+        <div class="section-tracker" id="section-tracker">
+            <div class="tracker-item active" data-target="sec-basic" onclick="App.scrollTo('sec-basic')">기본정보</div>
+            <div class="tracker-item" data-target="sec-sections" onclick="App.scrollTo('sec-sections')">반복섹션</div>
+            <div class="tracker-item" data-target="sec-products" onclick="App.scrollTo('sec-products')">승인상품</div>
+            <div class="tracker-item" data-target="sec-certs" onclick="App.scrollTo('sec-certs')">인증서</div>
+        </div>
+
+        <div class="editor-scroll" id="editor-scroll">
+
+            <!-- 언어 선택 -->
+            <div class="form-section" id="sec-basic">
+                <h2>언어 선택</h2>
+                <div class="lang-selector">
+                    <label><input type="radio" name="lang" value="ko" checked> 한국어</label>
+                    <label><input type="radio" name="lang" value="en"> English</label>
+                    <label><input type="radio" name="lang" value="cn"> 中文</label>
+                    <label><input type="radio" name="lang" value="jp"> 日本語</label>
+                </div>
+            </div>
+
+            <!-- 업체 기본 정보 -->
+            <div class="form-section">
+                <h2>업체 기본 정보</h2>
+                <div class="form-row">
+                    <label>업체명</label>
+                    <input type="text" id="inp-company-name" placeholder="예: 라온바다">
+                </div>
+                <div class="form-row">
+                    <label>업체 소개</label>
+                    <textarea id="inp-company-intro" rows="3" placeholder="업체 소개 문구를 입력하세요"></textarea>
+                </div>
+                <div class="form-row">
+                    <label>업체 대표 이미지</label>
+                    <input type="file" accept="image/*" data-target="inp-main-image">
+                    <div class="img-thumb" id="inp-main-image"></div>
+                </div>
+            </div>
+
+            <!-- 반복 섹션 -->
+            <div class="form-section" id="sec-sections">
+                <h2>반복 섹션 <button class="btn btn--add" onclick="App.addSection()">+ 섹션 추가</button></h2>
+                <div id="sections-container"></div>
+            </div>
+
+            <!-- 승인상품 -->
+            <div class="form-section" id="sec-products">
+                <h2>승인상품 <button class="btn btn--add" onclick="App.addProduct()">+ 상품 추가</button></h2>
+                <div id="products-container"></div>
+            </div>
+
+            <!-- 인증서 -->
+            <div class="form-section" id="sec-certs">
+                <h2>품질인증서 <button class="btn btn--add" onclick="App.addCert()">+ 인증서 추가</button></h2>
+                <div id="certs-container"></div>
+            </div>
+
+        </div>
+        </div>
+
+        <!-- 미리보기 패널 -->
+        <div class="editor-panel" id="panel-preview">
+            <div class="preview-scroll">
+                <div class="preview-wrap">
+                    <div id="preview-area"></div>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- ===== 우측: 사이드바 (프로젝트 목록) ===== -->
+    <aside class="sidebar">
+        <div class="sidebar-header">
+            <h2>프로젝트</h2>
+            <button class="btn btn--add" onclick="App.newProject()">+ 새 프로젝트</button>
+        </div>
+        <div class="sidebar-search">
+            <input type="text" id="project-search" placeholder="업체명 검색..." oninput="App.filterProjects(this.value)">
+        </div>
+        <div class="sidebar-status" id="project-current"></div>
+        <div class="sidebar-list" id="project-list"></div>
+    </aside>
+
+</div>
+
+<div class="toast" id="toast"></div>
+<script src="js/api.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
