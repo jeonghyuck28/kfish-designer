@@ -207,12 +207,18 @@ function autoPull() {
     try {
         const result = execSync('git pull', { cwd: __dirname, encoding: 'utf-8', timeout: 15000 });
         if (result.includes('Already up to date')) return;
-        console.log('[AutoPull] 변경 감지, 서버 재시작합니다...');
+        console.log('[AutoPull] 변경 감지:');
         console.log(result.trim());
-        // npm install 필요할 수 있으므로 실행
-        try { execSync('npm install --production', { cwd: __dirname, encoding: 'utf-8', timeout: 30000 }); } catch(e) {}
-        // 프로세스 재시작
-        process.exit(0); // 서비스 매니저가 자동 재시작
+
+        // server.js 또는 package.json 변경 시에만 서버 재시작
+        const needsRestart = result.includes('server.js') || result.includes('package.json');
+        if (needsRestart) {
+            console.log('[AutoPull] 서버 파일 변경 → 재시작합니다...');
+            try { execSync('npm install --production', { cwd: __dirname, encoding: 'utf-8', timeout: 30000 }); } catch(e) {}
+            process.exit(0); // 서비스 매니저가 자동 재시작
+        } else {
+            console.log('[AutoPull] 정적 파일만 변경 → 재시작 불필요');
+        }
     } catch (e) {
         console.error('[AutoPull] 실패:', e.message);
     }
