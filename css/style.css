@@ -325,15 +325,41 @@ body {
     padding: 6px 0;
 }
 
-/* 언어 선택 */
-.lang-selector { display: flex; gap: 20px; }
-.lang-selector label {
-    font-size: 14px;
-    cursor: pointer;
+/* 언어 선택 (탭 바) */
+.lang-bar {
     display: flex;
     align-items: center;
-    gap: 5px;
-    font-weight: 500;
+    gap: 14px;
+    margin-bottom: 20px;
+    padding: 10px 16px;
+    background: #fff;
+    border: 1px solid #d0d4da;
+    border-radius: 10px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+}
+.lang-bar-label {
+    font-size: 13px;
+    font-weight: 700;
+    color: #64748b;
+    white-space: nowrap;
+}
+.lang-tabs { display: flex; gap: 4px; }
+.lang-tab {
+    padding: 7px 18px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #64748b;
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.lang-tab:hover { background: #e2e8f0; color: #334155; }
+.lang-tab.active {
+    background: #1e40af;
+    color: #fff;
+    border-color: #1e40af;
 }
 
 /* ===== 이미지 썸네일 ===== */

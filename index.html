@@ -42,14 +42,14 @@
 
         <div class="editor-scroll" id="editor-scroll">
 
-            <!-- 언어 선택 -->
-            <div class="form-section" id="sec-basic">
-                <h2>언어 선택</h2>
-                <div class="lang-selector">
-                    <label><input type="radio" name="lang" value="ko" checked> 한국어</label>
-                    <label><input type="radio" name="lang" value="en"> English</label>
-                    <label><input type="radio" name="lang" value="cn"> 中文</label>
-                    <label><input type="radio" name="lang" value="jp"> 日本語</label>
+            <!-- 언어 선택 (탭 스타일) -->
+            <div class="lang-bar" id="sec-basic">
+                <span class="lang-bar-label">언어</span>
+                <div class="lang-tabs">
+                    <label class="lang-tab active"><input type="radio" name="lang" value="ko" checked hidden> 한국어</label>
+                    <label class="lang-tab"><input type="radio" name="lang" value="en" hidden> English</label>
+                    <label class="lang-tab"><input type="radio" name="lang" value="cn" hidden> 中文</label>
+                    <label class="lang-tab"><input type="radio" name="lang" value="jp" hidden> 日本語</label>
                 </div>
             </div>
 
