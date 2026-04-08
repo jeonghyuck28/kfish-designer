@@ -352,6 +352,7 @@ var App = (function() {
                 '<div class="section-item-file">' +
                     '<input type="file" accept="image/*" data-target="sec-item-thumb-' + id + '">' +
                     '<div class="img-thumb" id="sec-item-thumb-' + id + '"></div>' +
+                    '<label class="img-fit-toggle"><input type="checkbox" class="item-cover" checked> 채우기</label>' +
                 '</div>' +
                 '<div class="section-item-caption">' +
                     '<input type="text" class="item-caption" placeholder="캡션 (예: HACCP 인증 시설)">' +
@@ -404,7 +405,7 @@ var App = (function() {
             '</div>' +
             '<div class="form-row"><label>상품명</label><input type="text" class="prod-name" placeholder="예: 냉동 갈치"></div>' +
             '<div class="form-row"><label>상품 설명</label><textarea class="prod-desc" rows="2" placeholder="상품 소개"></textarea></div>' +
-            '<div class="form-row"><label>이미지</label><input type="file" accept="image/*" data-target="prod-img-' + id + '"><div class="img-thumb" id="prod-img-' + id + '"></div></div>';
+            '<div class="form-row"><label>이미지</label><input type="file" accept="image/*" data-target="prod-img-' + id + '"><div class="img-thumb" id="prod-img-' + id + '"></div><label class="img-fit-toggle"><input type="checkbox" class="item-cover" checked> 채우기</label></div>';
         c.appendChild(div);
     }
 
@@ -423,7 +424,7 @@ var App = (function() {
                 '</div>' +
             '</div>' +
             '<div class="form-row"><label>제목 (선택)</label><input type="text" class="cert-title" placeholder="예: HACCP 인증서"></div>' +
-            '<div class="form-row"><label>이미지</label><input type="file" accept="image/*" data-target="cert-img-' + id + '"><div class="img-thumb" id="cert-img-' + id + '"></div></div>';
+            '<div class="form-row"><label>이미지</label><input type="file" accept="image/*" data-target="cert-img-' + id + '"><div class="img-thumb" id="cert-img-' + id + '"></div><label class="img-fit-toggle"><input type="checkbox" class="item-cover" checked> 채우기</label></div>';
         c.appendChild(div);
     }
 
@@ -469,9 +470,11 @@ var App = (function() {
             for (var j = 0; j < itemEls.length; j++) {
                 var thumb = itemEls[j].querySelector('.img-thumb img');
                 var secText = (t.sections && t.sections[i]) ? t.sections[i] : { title: '', desc: '', captions: [] };
+                var coverChk = itemEls[j].querySelector('.item-cover');
                 items.push({
                     src: thumb ? thumb.src : '',
-                    caption: (secText.captions && secText.captions[j]) ? secText.captions[j] : ''
+                    caption: (secText.captions && secText.captions[j]) ? secText.captions[j] : '',
+                    cover: coverChk ? coverChk.checked : true
                 });
             }
             var sText = (t.sections && t.sections[i]) ? t.sections[i] : { title: '', desc: '' };
@@ -487,10 +490,12 @@ var App = (function() {
         var products = [];
         for (var i = 0; i < prodEls.length; i++) {
             var pText = (t.products && t.products[i]) ? t.products[i] : { name: '', desc: '' };
+            var prodCover = prodEls[i].querySelector('.item-cover');
             products.push({
                 name: pText.name || '',
                 description: pText.desc || '',
-                image: getThumbSrc('prod-img-' + prodEls[i].dataset.uid)
+                image: getThumbSrc('prod-img-' + prodEls[i].dataset.uid),
+                cover: prodCover ? prodCover.checked : true
             });
         }
 
@@ -498,9 +503,11 @@ var App = (function() {
         var certificates = [];
         for (var i = 0; i < certEls.length; i++) {
             var cText = (t.certs && t.certs[i]) ? t.certs[i] : { title: '' };
+            var certCover = certEls[i].querySelector('.item-cover');
             certificates.push({
                 image: getThumbSrc('cert-img-' + certEls[i].dataset.uid),
-                title: cText.title || ''
+                title: cText.title || '',
+                cover: certCover ? certCover.checked : true
             });
         }
 
@@ -527,23 +534,28 @@ var App = (function() {
         for (var i = 0; i < secEls.length; i++) {
             var items = [];
             var itemEls = secEls[i].querySelectorAll('.section-item');
+            var covers = [];
             for (var j = 0; j < itemEls.length; j++) {
                 var thumb = itemEls[j].querySelector('.img-thumb img');
+                var coverChk = itemEls[j].querySelector('.item-cover');
                 items.push(thumb ? thumb.src : '');
+                covers.push(coverChk ? coverChk.checked : true);
             }
-            sectionImages.push(items);
+            sectionImages.push({ items: items, covers: covers });
         }
 
         var prodEls = document.querySelectorAll('#products-container > .card-item');
         var productImages = [];
         for (var i = 0; i < prodEls.length; i++) {
-            productImages.push(getThumbSrc('prod-img-' + prodEls[i].dataset.uid));
+            var pc = prodEls[i].querySelector('.item-cover');
+            productImages.push({ src: getThumbSrc('prod-img-' + prodEls[i].dataset.uid), cover: pc ? pc.checked : true });
         }
 
         var certEls = document.querySelectorAll('#certs-container > .card-item');
         var certImages = [];
         for (var i = 0; i < certEls.length; i++) {
-            certImages.push(getThumbSrc('cert-img-' + certEls[i].dataset.uid));
+            var cc = certEls[i].querySelector('.item-cover');
+            certImages.push({ src: getThumbSrc('cert-img-' + certEls[i].dataset.uid), cover: cc ? cc.checked : true });
         }
 
         return {
@@ -634,8 +646,9 @@ var App = (function() {
                 h += '  <div class="tpl-section-items">\n';
                 h += '    <div class="tpl-item-grid tpl-item-grid--' + gmod + '">\n';
                 for (var j = 0; j < validItems.length; j++) {
+                    var fitStyle = validItems[j].cover === false ? ' style="object-fit:contain;background:#f0f0f0;"' : '';
                     h += '      <div class="tpl-item-card">\n';
-                    h += '        <img src="' + validItems[j].src + '" alt="">\n';
+                    h += '        <img src="' + validItems[j].src + '"' + fitStyle + ' alt="">\n';
                     if (validItems[j].caption) h += '        <div class="tpl-item-caption">' + esc(validItems[j].caption) + '</div>\n';
                     h += '      </div>\n';
                 }
@@ -653,8 +666,9 @@ var App = (function() {
             for (var i = 0; i < validProds.length; i++) {
                 var p = validProds[i];
                 h += '<div class="tpl-divider"><div class="tpl-divider-title"><em>K·FISH</em> ' + esc(p.name || '승인상품') + '</div></div>\n';
+                var pFit = p.cover === false ? ' style="object-fit:contain;background:#f0f0f0;"' : '';
                 h += '<div class="tpl-products"><div class="tpl-product">\n';
-                if (p.image) h += '  <img src="' + p.image + '" alt="">\n';
+                if (p.image) h += '  <img src="' + p.image + '"' + pFit + ' alt="">\n';
                 if (p.description) h += '  <div class="tpl-product-desc">' + esc(p.description).replace(/\n/g, '<br>') + '</div>\n';
                 h += '</div></div>\n';
             }
@@ -665,7 +679,8 @@ var App = (function() {
             h += '<div class="tpl-certs-header"><div class="tpl-certs-header-title">' + labels.certs + '</div></div>\n';
             h += '<div class="tpl-certs">\n';
             for (var i = 0; i < validCerts.length; i++) {
-                h += '  <div class="tpl-cert"><img src="' + validCerts[i].image + '" alt="">\n';
+                var cFit = validCerts[i].cover === false ? ' style="object-fit:contain;background:#fff;"' : '';
+                h += '  <div class="tpl-cert"><img src="' + validCerts[i].image + '"' + cFit + ' alt="">\n';
                 if (validCerts[i].title) h += '  <div class="tpl-cert-title">' + esc(validCerts[i].title) + '</div>\n';
                 h += '  </div>\n';
             }
@@ -847,7 +862,9 @@ var App = (function() {
             if (secEl.querySelector('.sec-desc')) secEl.querySelector('.sec-desc').value = koSec.desc || '';
             var list = document.getElementById('sec-items-' + secId);
             list.innerHTML = '';
-            var itemImages = secImages[i] || [];
+            var secImgData = secImages[i] || {};
+            var itemImages = secImgData.items || secImgData || [];
+            var itemCovers = secImgData.covers || [];
             var itemCount = Math.max(itemImages.length, (koSec.captions || []).length, 2);
             for (var j = 0; j < itemCount; j++) {
                 addSectionItem(secId);
@@ -860,6 +877,8 @@ var App = (function() {
                 }
                 var cap = itemEl.querySelector('.item-caption');
                 if (cap) cap.value = (koSec.captions && koSec.captions[j]) ? koSec.captions[j] : '';
+                var coverChk = itemEl.querySelector('.item-cover');
+                if (coverChk) coverChk.checked = (itemCovers[j] !== undefined) ? itemCovers[j] : true;
             }
         }
 
@@ -873,7 +892,10 @@ var App = (function() {
             var koProd = (_textData.ko.products && _textData.ko.products[i]) || { name: '', desc: '' };
             prodEl.querySelector('.prod-name').value = koProd.name || '';
             prodEl.querySelector('.prod-desc').value = koProd.desc || '';
-            restoreImg('prod-img-' + prodEl.dataset.uid, prodImages[i]);
+            var pImgData = prodImages[i] || {};
+            restoreImg('prod-img-' + prodEl.dataset.uid, pImgData.src || pImgData);
+            var pCover = prodEl.querySelector('.item-cover');
+            if (pCover) pCover.checked = (pImgData.cover !== undefined) ? pImgData.cover : true;
         }
 
         // 인증서
@@ -885,7 +907,10 @@ var App = (function() {
             var certEl = document.querySelector('#certs-container > .card-item:last-child');
             var koCert = (_textData.ko.certs && _textData.ko.certs[i]) || { title: '' };
             certEl.querySelector('.cert-title').value = koCert.title || '';
-            restoreImg('cert-img-' + certEl.dataset.uid, certImages[i]);
+            var cImgData = certImages[i] || {};
+            restoreImg('cert-img-' + certEl.dataset.uid, cImgData.src || cImgData);
+            var cCover = certEl.querySelector('.item-cover');
+            if (cCover) cCover.checked = (cImgData.cover !== undefined) ? cImgData.cover : true;
         }
     }
 

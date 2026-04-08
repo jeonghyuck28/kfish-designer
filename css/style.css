@@ -392,6 +392,22 @@ body {
 .img-thumb--has .img-thumb-del { display: flex; }
 .img-thumb-del:hover { background: #dc2626; }
 
+/* 이미지 채우기 토글 */
+.img-fit-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 6px;
+    font-size: 11px;
+    color: #64748b;
+    cursor: pointer;
+    font-weight: 500;
+}
+.img-fit-toggle input[type="checkbox"] {
+    accent-color: #3b82f6;
+    cursor: pointer;
+}
+
 /* ===== 카드 아이템 (섹션/상품/인증서) ===== */
 .card-item {
     background: #f8f9fb;
