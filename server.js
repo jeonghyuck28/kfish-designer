@@ -200,6 +200,27 @@ app.get('/{*splat}', (req, res) => {
 });
 
 
+// ===== Git 자동 pull + 서버 재시작 (5분마다) =====
+const { execSync } = require('child_process');
+
+function autoPull() {
+    try {
+        const result = execSync('git pull', { cwd: __dirname, encoding: 'utf-8', timeout: 15000 });
+        if (result.includes('Already up to date')) return;
+        console.log('[AutoPull] 변경 감지, 서버 재시작합니다...');
+        console.log(result.trim());
+        // npm install 필요할 수 있으므로 실행
+        try { execSync('npm install --production', { cwd: __dirname, encoding: 'utf-8', timeout: 30000 }); } catch(e) {}
+        // 프로세스 재시작
+        process.exit(0); // 서비스 매니저가 자동 재시작
+    } catch (e) {
+        console.error('[AutoPull] 실패:', e.message);
+    }
+}
+
+setInterval(autoPull, 5 * 60 * 1000); // 5분마다
+
+
 // ===== 서버 시작 =====
 app.listen(PORT, () => {
     console.log(`K·FISH 시안 생성기 서버 실행 중: http://localhost:${PORT}`);
