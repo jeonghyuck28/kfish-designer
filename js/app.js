@@ -646,9 +646,8 @@ var App = (function() {
                 h += '  <div class="tpl-section-items">\n';
                 h += '    <div class="tpl-item-grid tpl-item-grid--' + gmod + '">\n';
                 for (var j = 0; j < validItems.length; j++) {
-                    var fitStyle = validItems[j].cover === false ? ' style="object-fit:contain;background:#f0f0f0;"' : '';
                     h += '      <div class="tpl-item-card">\n';
-                    h += '        <img src="' + validItems[j].src + '"' + fitStyle + ' alt="">\n';
+                    h += '        ' + buildMediaBox(validItems[j].src, 'tpl-item-media', validItems[j].cover, '#f0f0f0') + '\n';
                     if (validItems[j].caption) h += '        <div class="tpl-item-caption">' + esc(validItems[j].caption) + '</div>\n';
                     h += '      </div>\n';
                 }
@@ -666,9 +665,8 @@ var App = (function() {
             for (var i = 0; i < validProds.length; i++) {
                 var p = validProds[i];
                 h += '<div class="tpl-divider"><div class="tpl-divider-title"><em>K·FISH</em> ' + esc(p.name || '승인상품') + '</div></div>\n';
-                var pFit = p.cover === false ? ' style="object-fit:contain;background:#f0f0f0;"' : '';
                 h += '<div class="tpl-products"><div class="tpl-product">\n';
-                if (p.image) h += '  <img src="' + p.image + '"' + pFit + ' alt="">\n';
+                if (p.image) h += '  ' + buildMediaBox(p.image, 'tpl-product-media', p.cover, '#f0f0f0') + '\n';
                 if (p.description) h += '  <div class="tpl-product-desc">' + esc(p.description).replace(/\n/g, '<br>') + '</div>\n';
                 h += '</div></div>\n';
             }
@@ -689,6 +687,14 @@ var App = (function() {
 
         h += '</div>\n</div>';
         return h;
+    }
+
+    function buildMediaBox(src, className, cover, bgColor) {
+        var modeClass = cover === false ? ' tpl-media-box--contain' : ' tpl-media-box--cover';
+        var style = ' style="background-image:url(&quot;' + esc(src) + '&quot;);';
+        if (cover === false && bgColor) style += 'background-color:' + bgColor + ';';
+        style += '"';
+        return '<div class="' + className + ' tpl-media-box' + modeClass + '"' + style + '></div>';
     }
 
 

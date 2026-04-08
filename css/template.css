@@ -207,36 +207,45 @@
     gap: 10px;
 }
 
+.tpl-media-box {
+    background-position: center center;
+    background-repeat: no-repeat;
+    background-size: cover;
+}
+.tpl-media-box--contain {
+    background-size: contain;
+}
+
 /* 1장: 풀너비 */
 .tpl-item-grid--1 .tpl-item-card { width: 700px; }
-.tpl-item-grid--1 .tpl-item-card img { height: 400px; }
+.tpl-item-grid--1 .tpl-item-media { height: 400px; }
 
 /* 2장: 반반 */
 .tpl-item-grid--2 .tpl-item-card { width: 345px; }
-.tpl-item-grid--2 .tpl-item-card img { height: 260px; }
+.tpl-item-grid--2 .tpl-item-media { height: 260px; }
 
 /* 3장: 위2 + 아래1 가운데 */
 .tpl-item-grid--3 .tpl-item-card { width: 345px; }
-.tpl-item-grid--3 .tpl-item-card img { height: 230px; }
+.tpl-item-grid--3 .tpl-item-media { height: 230px; }
 .tpl-item-grid--3 .tpl-item-card:nth-child(3) { width: 345px; margin: 0 auto; }
 
 /* 4장: 2x2 */
 .tpl-item-grid--4 .tpl-item-card { width: 345px; }
-.tpl-item-grid--4 .tpl-item-card img { height: 230px; }
+.tpl-item-grid--4 .tpl-item-media { height: 230px; }
 
 /* 5장 이상: 2열 */
 .tpl-item-grid--n .tpl-item-card { width: 345px; }
-.tpl-item-grid--n .tpl-item-card img { height: 230px; }
+.tpl-item-grid--n .tpl-item-media { height: 230px; }
 
 /* 아이템 카드 */
 .tpl-item-card {
     border-radius: 8px;
     overflow: hidden;
 }
-.tpl-item-card img {
+.tpl-item-media {
     width: 100%;
-    object-fit: cover;
-    display: block;
+    background-color: #f0f0f0;
+    border-radius: 8px;
 }
 .tpl-item-caption {
     padding: 10px 0 0;
@@ -285,13 +294,11 @@
     width: 700px;
     text-align: center;
 }
-.tpl-product img {
+.tpl-product-media {
     width: 700px;
     height: 480px;
-    object-fit: cover;
     border-radius: 8px;
-    /* border: 3px solid rgba(255,255,255,0.15); */
-    display: block;
+    background-color: #f0f0f0;
 }
 .tpl-product-name {
     font-size: 16px;
@@ -311,7 +318,7 @@
 /* 상품 2개 이상: 2열 */
 .tpl-products--multi { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
 .tpl-products--multi .tpl-product { width: 345px; }
-.tpl-products--multi .tpl-product img { width: 345px; height: 280px; }
+.tpl-products--multi .tpl-product .tpl-product-media { width: 345px; height: 280px; }
 
 /* ===== 품질인증서 섹션 ===== */
 .tpl-certs-header {
@@ -334,7 +341,7 @@
     padding: 20px 0 30px;
     display: flex;
     flex-wrap: wrap;
-    gap: 10px;
+    gap: 20px 10px;
     justify-content: center;
     background: #dfdfdf;
     border-radius: 0 0 8px 8px;
@@ -352,9 +359,8 @@
     background: #fff;
 }
 .tpl-cert-title {
-    font-size: 13px;
+    font-size: 16px;
     color: #333;
     font-weight: 600;
-    margin-top: 6px;
     letter-spacing: -0.2px;
 }
