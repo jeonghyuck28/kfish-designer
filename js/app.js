@@ -396,7 +396,7 @@ var App = (function() {
         div.dataset.uid = id;
         div.innerHTML =
             '<div class="card-item-header">' +
-                '<span class="card-item-label">상품</span>' +
+                '<span class="card-item-label">\uc0c1\ud488</span>' +
                 '<div class="card-item-actions">' +
                     '<button class="btn btn--move" onclick="App.moveItem(\'products-container\',' + id + ',-1)">▲</button>' +
                     '<button class="btn btn--move" onclick="App.moveItem(\'products-container\',' + id + ',1)">▼</button>' +
@@ -405,7 +405,7 @@ var App = (function() {
             '</div>' +
             '<div class="form-row"><label>상품명</label><input type="text" class="prod-name" placeholder="예: 냉동 갈치"></div>' +
             '<div class="form-row"><label>상품 설명</label><textarea class="prod-desc" rows="2" placeholder="상품 소개"></textarea></div>' +
-            '<div class="form-row"><label>이미지</label><input type="file" accept="image/*" data-target="prod-img-' + id + '"><div class="img-thumb" id="prod-img-' + id + '"></div><label class="img-fit-toggle"><input type="checkbox" class="item-cover" checked> 채우기</label></div>';
+            '<div class="form-row"><label>이미지</label><div class="img-upload-stack"><input type="file" accept="image/*" data-target="prod-img-' + id + '"><div class="img-thumb" id="prod-img-' + id + '"></div><label class="img-fit-toggle"><input type="checkbox" class="item-cover" checked> 채우기</label></div></div>';
         c.appendChild(div);
     }
 
@@ -424,7 +424,7 @@ var App = (function() {
                 '</div>' +
             '</div>' +
             '<div class="form-row"><label>제목 (선택)</label><input type="text" class="cert-title" placeholder="예: HACCP 인증서"></div>' +
-            '<div class="form-row"><label>이미지</label><input type="file" accept="image/*" data-target="cert-img-' + id + '"><div class="img-thumb" id="cert-img-' + id + '"></div><label class="img-fit-toggle"><input type="checkbox" class="item-cover" checked> 채우기</label></div>';
+            '<div class="form-row"><label>이미지</label><div class="img-upload-stack"><input type="file" accept="image/*" data-target="cert-img-' + id + '"><div class="img-thumb" id="cert-img-' + id + '"></div><label class="img-fit-toggle"><input type="checkbox" class="item-cover" checked> 채우기</label></div></div>';
         c.appendChild(div);
     }
 
@@ -871,9 +871,7 @@ var App = (function() {
                 var itemEl = list.querySelector('.section-item:last-child');
                 if (itemImages[j]) {
                     var thumb = itemEl.querySelector('.img-thumb');
-                    var img = document.createElement('img');
-                    img.src = itemImages[j];
-                    thumb.appendChild(img);
+                    restoreImg(thumb.id, itemImages[j]);
                 }
                 var cap = itemEl.querySelector('.item-caption');
                 if (cap) cap.value = (koSec.captions && koSec.captions[j]) ? koSec.captions[j] : '';
@@ -912,6 +910,8 @@ var App = (function() {
             var cCover = certEl.querySelector('.item-cover');
             if (cCover) cCover.checked = (cImgData.cover !== undefined) ? cImgData.cover : true;
         }
+
+        loadCurrentTexts();
     }
 
 
@@ -961,9 +961,7 @@ var App = (function() {
     function setVal(id, v) { var el = document.getElementById(id); if (el) el.value = v || ''; }
     function restoreImg(id, src) {
         if (!src) return;
-        var c = document.getElementById(id); if (!c) return;
-        c.innerHTML = '';
-        var img = document.createElement('img'); img.src = src; c.appendChild(img);
+        setThumbWithDelete(id, src);
     }
 
     function esc(str) {
