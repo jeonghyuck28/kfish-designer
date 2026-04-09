@@ -24,6 +24,11 @@ var App = (function() {
         cn: { why_title: '为什么选择 <em>K·FISH</em>?', why_desc: 'K·FISH是韩国政府认证的<br><strong>水产品出口综合品牌</strong>。<br>只有通过严格标准的水产品才能使用此名称。', products: '<em>K·FISH</em> 认证产品', certs: '质量认证' },
         jp: { why_title: 'なぜ <em>K·FISH</em> なのか?', why_desc: 'K·FISHは韓国政府が品質を認証した<br><strong>水産物輸出統合ブランド</strong>です。<br>厳しい基準を通過した水産物だけを取り扱っています。', products: '<em>K·FISH</em> 承認商品', certs: '品質認証書' }
     };
+    var DOWNLOAD_QUALITY_PRESETS = {
+        low: { name: '저용량', jpegQuality: 0.55 },
+        medium: { name: '기본', jpegQuality: 0.75 },
+        high: { name: '고화질', jpegQuality: 0.92 }
+    };
 
     var LANGS = ['ko', 'en', 'cn', 'jp'];
 
@@ -35,6 +40,7 @@ var App = (function() {
     var _imageCache = {};
     var _currentProjectId = null;
     var _currentLang = 'ko';
+    var _isDownloading = false;
 
     // ===== 언어별 텍스트 저장소 =====
     // { ko: { company_name, company_intro, sections: [{title, desc, captions:[]}], products: [{name, desc}], certs: [{title}] }, en: {...}, ... }
@@ -66,6 +72,7 @@ var App = (function() {
         bindTabEvents();
         bindFileInputEvents();
         bindImageUploadEvents();
+        bindDownloadModalEvents();
         bindScrollTracker();
         bindLangSwitch();
         buildInitialForm();
@@ -702,19 +709,95 @@ var App = (function() {
     //  이미지 다운로드
     // ==========================================================
     function downloadImage() {
+        openDownloadModal();
+    }
+
+    function bindDownloadModalEvents() {
+        var modal = document.getElementById('download-modal');
+        if (!modal) return;
+
+        var radios = modal.querySelectorAll('input[name="download-quality"]');
+        for (var i = 0; i < radios.length; i++) {
+            radios[i].addEventListener('change', syncDownloadQualityOptions);
+        }
+
+        var closeBtn = document.getElementById('download-modal-close');
+        if (closeBtn) closeBtn.addEventListener('click', closeDownloadModal);
+
+        var cancelBtn = document.getElementById('download-modal-cancel');
+        if (cancelBtn) cancelBtn.addEventListener('click', closeDownloadModal);
+
+        var confirmBtn = document.getElementById('download-modal-confirm');
+        if (confirmBtn) confirmBtn.addEventListener('click', confirmDownloadImage);
+
+        modal.addEventListener('click', function(e) {
+            if (e.target === modal) closeDownloadModal();
+        });
+
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape' && !modal.hidden) closeDownloadModal();
+        });
+
+        syncDownloadQualityOptions();
+    }
+
+    function openDownloadModal() {
+        var modal = document.getElementById('download-modal');
+        if (!modal) return;
+        modal.hidden = false;
+        document.body.style.overflow = 'hidden';
+        syncDownloadQualityOptions();
+    }
+
+    function closeDownloadModal() {
+        var modal = document.getElementById('download-modal');
+        if (!modal || _isDownloading) return;
+        modal.hidden = true;
+        document.body.style.overflow = '';
+    }
+
+    function syncDownloadQualityOptions() {
+        var modal = document.getElementById('download-modal');
+        if (!modal) return;
+        var options = modal.querySelectorAll('.download-quality-option');
+        for (var i = 0; i < options.length; i++) {
+            var radio = options[i].querySelector('input[type="radio"]');
+            options[i].classList.toggle('active', !!(radio && radio.checked));
+        }
+    }
+
+    function getSelectedDownloadPreset() {
+        var checked = document.querySelector('input[name="download-quality"]:checked');
+        var key = checked ? checked.value : 'medium';
+        return DOWNLOAD_QUALITY_PRESETS[key] || DOWNLOAD_QUALITY_PRESETS.medium;
+    }
+
+    function confirmDownloadImage() {
+        if (_isDownloading) return;
+        var preset = getSelectedDownloadPreset();
         var data = getFormData();
         var previewArea = document.getElementById('preview-area');
         previewArea.innerHTML = buildHTML(data, false);
-        toast('이미지 생성 중...');
+        _isDownloading = true;
+        closeDownloadModalForced();
+        toast('이미지 생성 중... (' + preset.name + ')');
         setTimeout(function() {
             html2canvas(previewArea, { width: 900, scale: 1, useCORS: true, backgroundColor: null }).then(function(canvas) {
                 var a = document.createElement('a');
-                a.href = canvas.toDataURL('image/jpeg', 0.85);
+                a.href = canvas.toDataURL('image/jpeg', preset.jpegQuality);
                 a.download = (data.company.name || 'kfish_시안') + '_' + data.lang + '.jpg';
                 a.click();
                 toast('이미지가 다운로드되었습니다!');
-            }).catch(function() { toast('이미지 생성 실패'); });
+            }).catch(function() { toast('이미지 생성 실패'); })
+              .finally(function() { _isDownloading = false; });
         }, 200);
+    }
+
+    function closeDownloadModalForced() {
+        var modal = document.getElementById('download-modal');
+        if (!modal) return;
+        modal.hidden = true;
+        document.body.style.overflow = '';
     }
 
 
