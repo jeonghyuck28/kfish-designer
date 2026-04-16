@@ -16,8 +16,11 @@ var API = (function() {
         };
         if (body) opts.body = JSON.stringify(body);
         return fetch(BASE + url, opts).then(function(res) {
-            if (!res.ok) throw new Error('API 오류: ' + res.status);
-            return res.json();
+            return res.text().then(function(text) {
+                var data = text ? JSON.parse(text) : {};
+                if (!res.ok) throw new Error((data && data.error) ? data.error : 'API 오류: ' + res.status);
+                return data;
+            });
         });
     }
 
@@ -87,6 +90,20 @@ var API = (function() {
         });
     }
 
+    /** DeepL 사용량 조회 */
+    function getTranslateUsage() {
+        return request('GET', '/translate/usage');
+    }
+
+    /** 한국어 기준 번역 */
+    function translate(sourceLang, targetLang, data) {
+        return request('POST', '/translate', {
+            sourceLang: sourceLang,
+            targetLang: targetLang,
+            data: data
+        });
+    }
+
     return {
         getProjects: getProjects,
         getProject: getProject,
@@ -95,6 +112,8 @@ var API = (function() {
         deleteProject: deleteProject,
         deleteImage: deleteImage,
         uploadImage: uploadImage,
-        uploadImages: uploadImages
+        uploadImages: uploadImages,
+        getTranslateUsage: getTranslateUsage,
+        translate: translate
     };
 })();

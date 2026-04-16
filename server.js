@@ -10,8 +10,31 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
+function loadLocalEnv() {
+    const envPath = path.join(__dirname, '.env');
+    if (!fs.existsSync(envPath)) return;
+
+    const lines = fs.readFileSync(envPath, 'utf-8').split(/\r?\n/);
+    for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+
+        const eqIndex = trimmed.indexOf('=');
+        if (eqIndex === -1) continue;
+
+        const key = trimmed.slice(0, eqIndex).trim();
+        let value = trimmed.slice(eqIndex + 1).trim();
+        if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+            value = value.slice(1, -1);
+        }
+        if (key && process.env[key] === undefined) process.env[key] = value;
+    }
+}
+
+loadLocalEnv();
+
 const app = express();
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 // ===== 미들웨어 =====
 app.use(express.json({ limit: '50mb' }));
@@ -143,6 +166,181 @@ app.post('/api/upload-multi', upload.array('images', 10), (req, res) => {
     if (!req.files || req.files.length === 0) return res.status(400).json({ error: '파일이 없습니다.' });
     const urls = req.files.map(f => '/uploads/' + f.filename);
     res.json({ urls: urls });
+});
+
+
+// ===== API: DeepL 번역 =====
+const DEEPL_LANGS = {
+    ko: 'KO',
+    en: 'EN-US',
+    cn: 'ZH-HANS',
+    jp: 'JA'
+};
+
+function getDeepLConfig() {
+    const apiKey = process.env.DEEPL_API_KEY || '';
+    const defaultBase = apiKey.endsWith(':fx') ? 'https://api-free.deepl.com' : 'https://api.deepl.com';
+    return {
+        apiKey: apiKey,
+        baseUrl: process.env.DEEPL_API_BASE || defaultBase
+    };
+}
+
+function countCodePoints(text) {
+    return Array.from(text || '').length;
+}
+
+function collectTextFields(data) {
+    const fields = [];
+
+    function add(path, value) {
+        if (typeof value === 'string' && value.trim()) {
+            fields.push({ path: path, value: value });
+        }
+    }
+
+    add(['company_name'], data && data.company_name);
+    add(['company_intro'], data && data.company_intro);
+
+    const sections = Array.isArray(data && data.sections) ? data.sections : [];
+    sections.forEach((section, index) => {
+        const hasFixedTitle = section && section.fixedTitleIndex !== undefined && section.fixedTitleIndex !== null && section.fixedTitleIndex !== '';
+        if (!hasFixedTitle) add(['sections', index, 'title'], section && section.title);
+        add(['sections', index, 'desc'], section && section.desc);
+        const captions = Array.isArray(section && section.captions) ? section.captions : [];
+        captions.forEach((caption, captionIndex) => {
+            add(['sections', index, 'captions', captionIndex], caption);
+        });
+    });
+
+    const products = Array.isArray(data && data.products) ? data.products : [];
+    products.forEach((product, index) => {
+        add(['products', index, 'name'], product && product.name);
+        add(['products', index, 'desc'], product && product.desc);
+    });
+
+    const certs = Array.isArray(data && data.certs) ? data.certs : [];
+    certs.forEach((cert, index) => {
+        add(['certs', index, 'title'], cert && cert.title);
+    });
+
+    return fields;
+}
+
+function setByPath(target, pathParts, value) {
+    let cursor = target;
+    for (let i = 0; i < pathParts.length - 1; i++) {
+        cursor = cursor[pathParts[i]];
+        if (cursor === undefined || cursor === null) return;
+    }
+    cursor[pathParts[pathParts.length - 1]] = value;
+}
+
+async function fetchDeepLUsage() {
+    const config = getDeepLConfig();
+    if (!config.apiKey) throw new Error('DeepL API 키가 설정되지 않았습니다.');
+    if (typeof fetch !== 'function') throw new Error('현재 Node.js 버전에서 fetch를 사용할 수 없습니다.');
+
+    const response = await fetch(config.baseUrl + '/v2/usage', {
+        method: 'GET',
+        headers: { Authorization: 'DeepL-Auth-Key ' + config.apiKey }
+    });
+    const text = await response.text();
+    const data = text ? JSON.parse(text) : {};
+
+    if (!response.ok) {
+        throw new Error(data.message || data.error || ('DeepL 사용량 조회 실패: ' + response.status));
+    }
+    return data;
+}
+
+async function translateTexts(fields, sourceLang, targetLang) {
+    const config = getDeepLConfig();
+    const translated = [];
+    const chunkSize = 40;
+
+    for (let i = 0; i < fields.length; i += chunkSize) {
+        const chunk = fields.slice(i, i + chunkSize);
+        const params = new URLSearchParams();
+        chunk.forEach(field => params.append('text', field.value));
+        params.append('source_lang', sourceLang);
+        params.append('target_lang', targetLang);
+        params.append('preserve_formatting', '1');
+
+        const response = await fetch(config.baseUrl + '/v2/translate', {
+            method: 'POST',
+            headers: {
+                Authorization: 'DeepL-Auth-Key ' + config.apiKey,
+                'Content-Type': 'application/x-www-form-urlencoded'
+            },
+            body: params
+        });
+        const text = await response.text();
+        const data = text ? JSON.parse(text) : {};
+
+        if (!response.ok) {
+            if (response.status === 456) throw new Error('DeepL 월 사용량 한도를 초과했습니다.');
+            throw new Error(data.message || data.error || ('DeepL 번역 실패: ' + response.status));
+        }
+
+        const items = Array.isArray(data.translations) ? data.translations : [];
+        items.forEach(item => translated.push(item.text || ''));
+    }
+
+    return translated;
+}
+
+app.get('/api/translate/usage', async (req, res) => {
+    try {
+        res.json(await fetchDeepLUsage());
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+app.post('/api/translate', async (req, res) => {
+    try {
+        const { sourceLang, targetLang, data } = req.body;
+        const source = DEEPL_LANGS[sourceLang || 'ko'];
+        const target = DEEPL_LANGS[targetLang];
+
+        if (!source || !target) return res.status(400).json({ error: '지원하지 않는 언어입니다.' });
+        if (sourceLang === targetLang) return res.status(400).json({ error: '같은 언어로는 번역할 수 없습니다.' });
+
+        const config = getDeepLConfig();
+        if (!config.apiKey) return res.status(500).json({ error: 'DeepL API 키가 설정되지 않았습니다.' });
+        if (typeof fetch !== 'function') return res.status(500).json({ error: '현재 Node.js 버전에서 fetch를 사용할 수 없습니다.' });
+
+        const fields = collectTextFields(data || {});
+        if (fields.length === 0) return res.status(400).json({ error: '번역할 한국어 텍스트가 없습니다.' });
+
+        const sourceCharacterCount = fields.reduce((sum, field) => sum + countCodePoints(field.value), 0);
+        const usageBefore = await fetchDeepLUsage();
+        if (usageBefore.character_limit && usageBefore.character_count + sourceCharacterCount > usageBefore.character_limit) {
+            return res.status(429).json({
+                error: 'DeepL 남은 사용량보다 번역할 글자 수가 많습니다.',
+                usage: usageBefore,
+                sourceCharacterCount: sourceCharacterCount
+            });
+        }
+
+        const output = JSON.parse(JSON.stringify(data || {}));
+        const translatedTexts = await translateTexts(fields, source, target);
+        fields.forEach((field, index) => setByPath(output, field.path, translatedTexts[index] || ''));
+
+        let usageAfter = usageBefore;
+        try {
+            usageAfter = await fetchDeepLUsage();
+        } catch (e) {}
+
+        res.json({
+            data: output,
+            usage: usageAfter,
+            sourceCharacterCount: sourceCharacterCount
+        });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
 });
 
 

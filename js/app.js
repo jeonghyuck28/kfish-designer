@@ -31,26 +31,52 @@ var App = (function() {
     };
 
     var LANGS = ['ko', 'en', 'cn', 'jp'];
-
-    var DEFAULT_SECTIONS = ['설비 관리', '수출관련 현지화 전략', '품질안전관리 전략', '상품 제조현황'];
+    var LANG_LABELS = { ko: '한국어', en: '영어', cn: '중국어', jp: '일본어' };
+    var DEFAULT_SECTION_TITLES = {
+        ko: ['설비 관리', '수출관련 현지화 전략', '품질안전관리 전략', '상품 제조현황'],
+        en: ['Facility Management', 'Export Localization Strategy', 'Quality and Safety Management Strategy', 'Product Manufacturing Status'],
+        cn: ['设备管理', '出口本地化战略', '质量安全管理战略', '产品制造现状'],
+        jp: ['設備管理', '輸出関連の現地化戦略', '品質安全管理戦略', '商品製造状況']
+    };
+    var DEFAULT_SECTIONS = DEFAULT_SECTION_TITLES.ko;
+    var AUTOSAVE_INTERVAL_MS = 60 * 1000;
 
     var _uid = 0;
     function uid() { return ++_uid; }
 
     var _imageCache = {};
     var _currentProjectId = null;
+    var _formProjectId = null;
     var _currentLang = 'ko';
     var _isDownloading = false;
+    var _isTranslating = false;
+    var _isSaving = false;
+    var _lastSavedSignature = '';
+    var _lastSavedAt = '';
+    var _autoSaveTimer = null;
+    var _dirtyCheckTimer = null;
+    var _isRestoringProject = false;
+    var _isOpeningProject = false;
+    var _saveVersion = 0;
+    var _savePromise = null;
 
     // ===== 언어별 텍스트 저장소 =====
     // { ko: { company_name, company_intro, sections: [{title, desc, captions:[]}], products: [{name, desc}], certs: [{title}] }, en: {...}, ... }
     var _textData = {};
 
-    function emptyTextData() {
+    function getDefaultSectionTitle(lang, index) {
+        var titles = DEFAULT_SECTION_TITLES[lang] || DEFAULT_SECTION_TITLES.ko;
+        return titles[index] || '';
+    }
+
+    function emptyTextData(lang) {
+        var targetLang = lang || 'ko';
         return {
             company_name: '',
             company_intro: '',
-            sections: DEFAULT_SECTIONS.map(function(t) { return { title: t, desc: '', captions: ['', ''] }; }),
+            sections: (DEFAULT_SECTION_TITLES[targetLang] || DEFAULT_SECTION_TITLES.ko).map(function(t, index) {
+                return { title: t, desc: '', captions: ['', ''], fixedTitleIndex: index };
+            }),
             products: [{ name: '', desc: '' }],
             certs: []
         };
@@ -59,7 +85,7 @@ var App = (function() {
     function initTextData() {
         _textData = {};
         for (var i = 0; i < LANGS.length; i++) {
-            _textData[LANGS[i]] = emptyTextData();
+            _textData[LANGS[i]] = emptyTextData(LANGS[i]);
         }
     }
 
@@ -75,15 +101,20 @@ var App = (function() {
         bindDownloadModalEvents();
         bindScrollTracker();
         bindLangSwitch();
+        bindEditorChangeEvents();
         buildInitialForm();
         preloadTemplateImages();
         loadProjectList();
+        refreshDeepLUsage();
+        updateTranslateEstimate();
+        setSaveStatus('저장 대기', 'saved');
+        startAutoSave();
     }
 
     function buildInitialForm() {
         // 기본 섹션 4개 + 상품 1개
         for (var i = 0; i < DEFAULT_SECTIONS.length; i++) {
-            var secId = addSection(DEFAULT_SECTIONS[i]);
+            var secId = addSection(getDefaultSectionTitle('ko', i), i);
             addSectionItem(secId);
             addSectionItem(secId);
         }
@@ -137,6 +168,43 @@ var App = (function() {
         }
     }
 
+    function setActiveLangTab(lang) {
+        var tabs = document.querySelectorAll('.lang-tab');
+        for (var i = 0; i < tabs.length; i++) {
+            var radio = tabs[i].querySelector('input[name="lang"]');
+            var active = !!(radio && radio.value === lang);
+            tabs[i].classList.toggle('active', active);
+            if (radio) radio.checked = active;
+        }
+    }
+
+    function bindEditorChangeEvents() {
+        var scroll = document.getElementById('editor-scroll');
+        if (scroll) {
+            scroll.addEventListener('input', function(e) {
+                updateTranslateEstimate();
+                if (e.target && e.target.id === 'translate-empty-only') return;
+                markDirtySoon();
+            });
+            scroll.addEventListener('change', function(e) {
+                updateTranslateEstimate();
+                if (e.target && e.target.id === 'translate-empty-only') return;
+                markDirtySoon();
+            });
+        }
+
+        var emptyOnly = document.getElementById('translate-empty-only');
+        if (emptyOnly) {
+            emptyOnly.addEventListener('change', updateTranslateEstimate);
+        }
+
+        window.addEventListener('beforeunload', function(e) {
+            if (!hasUnsavedChanges()) return;
+            e.preventDefault();
+            e.returnValue = '';
+        });
+    }
+
     /** 언어 전환: 현재 텍스트 저장 → 새 언어 텍스트 로드 */
     function switchLang(newLang) {
         // 현재 언어 텍스트 저장
@@ -145,10 +213,317 @@ var App = (function() {
         _currentLang = newLang;
         // 새 언어 텍스트 로드
         loadCurrentTexts();
+        updateTranslateEstimate();
+        markDirtySoon();
+    }
+
+    function getFixedTitleIndex(section) {
+        if (!section) return null;
+        var raw = section.dataset ? section.dataset.fixedTitleIndex : undefined;
+        if (raw === undefined || raw === '') return null;
+        var index = Number(raw);
+        return isNaN(index) ? null : index;
+    }
+
+    function setFixedTitleInputState(section, input, fixedIndex) {
+        if (!input) return;
+        var isFixed = fixedIndex !== null && fixedIndex !== undefined;
+        input.readOnly = isFixed;
+        input.classList.toggle('sec-title--fixed', isFixed);
+        if (section && section.dataset) {
+            if (isFixed) section.dataset.fixedTitleIndex = String(fixedIndex);
+            else delete section.dataset.fixedTitleIndex;
+        }
+    }
+
+    function ensureFixedSectionTitlesForLang(lang) {
+        var t = _textData[lang];
+        if (!t) return;
+        if (!Array.isArray(t.sections)) t.sections = [];
+
+        for (var i = 0; i < t.sections.length; i++) {
+            var section = t.sections[i] || { title: '', desc: '', captions: [] };
+            if (section.fixedTitleIndex !== undefined && section.fixedTitleIndex !== null && section.fixedTitleIndex !== '') {
+                var fixedIndex = Number(section.fixedTitleIndex);
+                if (!isNaN(fixedIndex)) {
+                    section.fixedTitleIndex = fixedIndex;
+                    section.title = getDefaultSectionTitle(lang, fixedIndex);
+                }
+            }
+            t.sections[i] = section;
+        }
+    }
+
+    function ensureDefaultFixedSectionTitles() {
+        for (var i = 0; i < LANGS.length; i++) {
+            var lang = LANGS[i];
+            var t = _textData[lang];
+            if (!t) continue;
+            if (!Array.isArray(t.sections)) t.sections = [];
+
+            for (var j = 0; j < Math.min(DEFAULT_SECTIONS.length, t.sections.length); j++) {
+                if (!t.sections[j]) t.sections[j] = { title: '', desc: '', captions: [] };
+                if (t.sections[j].fixedTitleIndex === undefined || t.sections[j].fixedTitleIndex === null || t.sections[j].fixedTitleIndex === '') {
+                    t.sections[j].fixedTitleIndex = j;
+                }
+            }
+            ensureFixedSectionTitlesForLang(lang);
+        }
+    }
+
+    function ensureAllFixedSectionTitles() {
+        for (var i = 0; i < LANGS.length; i++) ensureFixedSectionTitlesForLang(LANGS[i]);
+    }
+
+    function countCodePoints(text) {
+        return Array.from(text || '').length;
+    }
+
+    function countTextDataChars(data) {
+        var total = 0;
+
+        function add(value) {
+            if (typeof value === 'string' && value.trim()) total += countCodePoints(value);
+        }
+
+        add(data && data.company_name);
+        add(data && data.company_intro);
+
+        var sections = (data && data.sections) || [];
+        for (var i = 0; i < sections.length; i++) {
+            if (sections[i].fixedTitleIndex === undefined || sections[i].fixedTitleIndex === null || sections[i].fixedTitleIndex === '') {
+                add(sections[i].title);
+            }
+            add(sections[i].desc);
+            var captions = sections[i].captions || [];
+            for (var j = 0; j < captions.length; j++) add(captions[j]);
+        }
+
+        var products = (data && data.products) || [];
+        for (var p = 0; p < products.length; p++) {
+            add(products[p].name);
+            add(products[p].desc);
+        }
+
+        var certs = (data && data.certs) || [];
+        for (var c = 0; c < certs.length; c++) add(certs[c].title);
+
+        return total;
+    }
+
+    function isBlank(value) {
+        return !value || !String(value).trim();
+    }
+
+    function cloneData(data) {
+        return JSON.parse(JSON.stringify(data || {}));
+    }
+
+    function getByPath(target, pathParts) {
+        var cursor = target;
+        for (var i = 0; i < pathParts.length; i++) {
+            if (cursor === undefined || cursor === null) return '';
+            cursor = cursor[pathParts[i]];
+        }
+        return cursor;
+    }
+
+    function setByPath(target, pathParts, value) {
+        var cursor = target;
+        for (var i = 0; i < pathParts.length - 1; i++) {
+            if (cursor[pathParts[i]] === undefined || cursor[pathParts[i]] === null) {
+                cursor[pathParts[i]] = typeof pathParts[i + 1] === 'number' ? [] : {};
+            }
+            cursor = cursor[pathParts[i]];
+        }
+        cursor[pathParts[pathParts.length - 1]] = value;
+    }
+
+    function collectTranslatablePaths(data) {
+        var paths = [];
+
+        function add(path, value) {
+            if (typeof value === 'string' && value.trim()) paths.push(path);
+        }
+
+        add(['company_name'], data && data.company_name);
+        add(['company_intro'], data && data.company_intro);
+
+        var sections = (data && data.sections) || [];
+        for (var i = 0; i < sections.length; i++) {
+            var section = sections[i] || {};
+            if (section.fixedTitleIndex === undefined || section.fixedTitleIndex === null || section.fixedTitleIndex === '') {
+                add(['sections', i, 'title'], section.title);
+            }
+            add(['sections', i, 'desc'], section.desc);
+            var captions = section.captions || [];
+            for (var j = 0; j < captions.length; j++) add(['sections', i, 'captions', j], captions[j]);
+        }
+
+        var products = (data && data.products) || [];
+        for (var p = 0; p < products.length; p++) {
+            add(['products', p, 'name'], products[p] && products[p].name);
+            add(['products', p, 'desc'], products[p] && products[p].desc);
+        }
+
+        var certs = (data && data.certs) || [];
+        for (var c = 0; c < certs.length; c++) add(['certs', c, 'title'], certs[c] && certs[c].title);
+
+        return paths;
+    }
+
+    function buildTranslationSource(source, target, fillEmptyOnly) {
+        var payload = cloneData(source);
+        var paths = collectTranslatablePaths(source);
+
+        for (var i = 0; i < paths.length; i++) {
+            var path = paths[i];
+            var shouldTranslate = !fillEmptyOnly || isBlank(getByPath(target, path));
+            if (!shouldTranslate) setByPath(payload, path, '');
+        }
+
+        return payload;
+    }
+
+    function mergeTranslatedIntoTarget(target, translated, fillEmptyOnly) {
+        var output = cloneData(target || {});
+        var paths = collectTranslatablePaths(translated);
+
+        for (var i = 0; i < paths.length; i++) {
+            var path = paths[i];
+            var translatedValue = getByPath(translated, path);
+            if (isBlank(translatedValue)) continue;
+            if (!fillEmptyOnly || isBlank(getByPath(output, path))) {
+                setByPath(output, path, translatedValue);
+            }
+        }
+
+        return output;
+    }
+
+    function isFillEmptyOnlyMode() {
+        var el = document.getElementById('translate-empty-only');
+        return !el || el.checked;
+    }
+
+    function getCurrentTranslationPayload() {
+        if (_currentLang === 'ko') return emptyTextData('ko');
+        return buildTranslationSource(_textData.ko || emptyTextData('ko'), _textData[_currentLang] || emptyTextData(_currentLang), isFillEmptyOnlyMode());
+    }
+
+    function updateTranslateEstimate() {
+        var el = document.getElementById('translate-estimate');
+        if (!el) return;
+        if (_isRestoringProject) return;
+
+        saveCurrentTexts();
+        if (_currentLang === 'ko') {
+            el.textContent = '번역 대상 없음';
+            return;
+        }
+
+        var chars = countTextDataChars(getCurrentTranslationPayload());
+        el.textContent = '예상 ' + chars.toLocaleString() + '자';
+    }
+
+    function normalizeUsage(usage) {
+        if (!usage) return null;
+        var count = Number(usage.character_count || 0);
+        var limit = Number(usage.character_limit || 0);
+        if (!limit) return null;
+        return { count: count, limit: limit, ratio: count / limit };
+    }
+
+    function renderDeepLUsage(usage) {
+        var el = document.getElementById('deepl-usage');
+        if (!el) return;
+
+        el.classList.remove('warn', 'danger');
+        var info = normalizeUsage(usage);
+        if (!info) {
+            el.textContent = 'DeepL 사용량 확인 불가';
+            el.classList.add('warn');
+            return;
+        }
+
+        el.textContent = 'DeepL ' + info.count.toLocaleString() + ' / ' + info.limit.toLocaleString() + '자';
+        if (info.ratio >= 0.96) el.classList.add('danger');
+        else if (info.ratio >= 0.9) el.classList.add('warn');
+    }
+
+    function refreshDeepLUsage() {
+        var el = document.getElementById('deepl-usage');
+        if (el) el.textContent = 'DeepL 사용량 확인 중';
+
+        API.getTranslateUsage().then(function(usage) {
+            renderDeepLUsage(usage);
+        }).catch(function(err) {
+            if (el) {
+                el.textContent = 'DeepL 사용량 확인 실패';
+                el.classList.add('warn');
+            }
+            console.warn(err);
+        });
+    }
+
+    function setTranslateButtonLoading(loading) {
+        var btn = document.getElementById('btn-translate-current');
+        if (!btn) return;
+        btn.disabled = loading;
+        btn.textContent = loading ? '번역 중...' : '한국어 기준 번역';
+    }
+
+    function translateCurrentFromKorean() {
+        if (_isTranslating) return;
+
+        saveCurrentTexts();
+
+        if (_currentLang === 'ko') {
+            toast('한국어는 번역 대상이 아닙니다.');
+            return;
+        }
+
+        var fillEmptyOnly = isFillEmptyOnlyMode();
+        var source = getCurrentTranslationPayload();
+        var sourceChars = countTextDataChars(source);
+        if (sourceChars === 0) {
+            toast(fillEmptyOnly ? '번역할 빈칸이 없습니다.' : '번역할 한국어 텍스트가 없습니다.');
+            return;
+        }
+
+        var target = _textData[_currentLang] || emptyTextData();
+        if (!fillEmptyOnly && countTextDataChars(target) > 0) {
+            var ok = confirm((LANG_LABELS[_currentLang] || '현재 언어') + ' 입력 내용이 번역 결과로 덮어써집니다. 계속할까요?');
+            if (!ok) return;
+        }
+
+        _isTranslating = true;
+        setTranslateButtonLoading(true);
+
+        API.translate('ko', _currentLang, source).then(function(res) {
+            _textData[_currentLang] = fillEmptyOnly ? mergeTranslatedIntoTarget(target, res.data, true) : res.data;
+            ensureFixedSectionTitlesForLang(_currentLang);
+            loadCurrentTexts();
+            updateTranslateEstimate();
+            if (res.usage) renderDeepLUsage(res.usage);
+            return persistProject({ silent: true }).then(function() {
+                toast((LANG_LABELS[_currentLang] || '현재 언어') + '로 번역하고 저장했습니다.');
+            }).catch(function(err) {
+                toast('번역은 완료됐지만 저장에 실패했습니다.');
+                console.warn(err);
+            });
+        }).catch(function(err) {
+            toast(err.message || '번역에 실패했습니다.');
+            refreshDeepLUsage();
+        }).finally(function() {
+            _isTranslating = false;
+            setTranslateButtonLoading(false);
+        });
     }
 
     /** 폼에서 현재 언어의 텍스트를 _textData에 저장 */
     function saveCurrentTexts() {
+        if (_isRestoringProject) return;
         var t = _textData[_currentLang];
         if (!t) return;
 
@@ -160,17 +535,20 @@ var App = (function() {
         t.sections = [];
         for (var i = 0; i < secEls.length; i++) {
             var sec = secEls[i];
+            var fixedTitleIndex = getFixedTitleIndex(sec);
             var captions = [];
             var itemEls = sec.querySelectorAll('.section-item');
             for (var j = 0; j < itemEls.length; j++) {
                 var cap = itemEls[j].querySelector('.item-caption');
                 captions.push(cap ? cap.value : '');
             }
-            t.sections.push({
-                title: sec.querySelector('.sec-title') ? sec.querySelector('.sec-title').value : '',
+            var sectionText = {
+                title: fixedTitleIndex !== null ? getDefaultSectionTitle(_currentLang, fixedTitleIndex) : (sec.querySelector('.sec-title') ? sec.querySelector('.sec-title').value : ''),
                 desc: sec.querySelector('.sec-desc') ? sec.querySelector('.sec-desc').value : '',
                 captions: captions
-            });
+            };
+            if (fixedTitleIndex !== null) sectionText.fixedTitleIndex = fixedTitleIndex;
+            t.sections.push(sectionText);
         }
 
         // 상품
@@ -208,7 +586,14 @@ var App = (function() {
         for (var i = 0; i < secEls.length; i++) {
             var secText = (t.sections && t.sections[i]) ? t.sections[i] : { title: '', desc: '', captions: [] };
             var sec = secEls[i];
-            if (sec.querySelector('.sec-title')) sec.querySelector('.sec-title').value = secText.title || '';
+            var fixedTitleIndex = getFixedTitleIndex(sec);
+            if (fixedTitleIndex === null && secText.fixedTitleIndex !== undefined && secText.fixedTitleIndex !== null && secText.fixedTitleIndex !== '') {
+                fixedTitleIndex = Number(secText.fixedTitleIndex);
+                if (isNaN(fixedTitleIndex)) fixedTitleIndex = null;
+            }
+            var titleInput = sec.querySelector('.sec-title');
+            setFixedTitleInputState(sec, titleInput, fixedTitleIndex);
+            if (titleInput) titleInput.value = fixedTitleIndex !== null ? getDefaultSectionTitle(_currentLang, fixedTitleIndex) : (secText.title || '');
             if (sec.querySelector('.sec-desc')) sec.querySelector('.sec-desc').value = secText.desc || '';
             var itemEls = sec.querySelectorAll('.section-item');
             for (var j = 0; j < itemEls.length; j++) {
@@ -304,14 +689,16 @@ var App = (function() {
     // ==========================================================
     //  섹션 폼
     // ==========================================================
-    function addSection(defaultTitle) {
+    function addSection(defaultTitle, fixedTitleIndex) {
         var id = uid();
         var titleVal = defaultTitle || '';
+        var isFixedTitle = fixedTitleIndex !== undefined && fixedTitleIndex !== null;
         var c = document.getElementById('sections-container');
         var div = document.createElement('div');
         div.className = 'card-item card-section';
         div.id = 'section-' + id;
         div.dataset.uid = id;
+        if (isFixedTitle) div.dataset.fixedTitleIndex = fixedTitleIndex;
         div.innerHTML =
             '<div class="card-item-header">' +
                 '<span class="card-item-label">섹션</span>' +
@@ -322,8 +709,8 @@ var App = (function() {
                 '</div>' +
             '</div>' +
             '<div class="form-row">' +
-                '<label>섹션 제목</label>' +
-                '<input type="text" class="sec-title" placeholder="예: 설비 관리" value="' + titleVal.replace(/"/g, '&quot;') + '">' +
+                '<label>섹션 제목' + (isFixedTitle ? ' (고정)' : '') + '</label>' +
+                '<input type="text" class="sec-title' + (isFixedTitle ? ' sec-title--fixed' : '') + '" placeholder="예: 설비 관리" value="' + titleVal.replace(/"/g, '&quot;') + '"' + (isFixedTitle ? ' readonly' : '') + '>' +
             '</div>' +
             '<div class="form-row">' +
                 '<label>섹션 설명 (선택, 하단 불투명 박스에 표시)</label>' +
@@ -335,6 +722,8 @@ var App = (function() {
             '</div>' +
             '<div class="section-items-list" id="sec-items-' + id + '"></div>';
         c.appendChild(div);
+        markDirtySoon();
+        updateTranslateEstimate();
         return id;
     }
 
@@ -357,7 +746,7 @@ var App = (function() {
             '</div>' +
             '<div class="section-item-body">' +
                 '<div class="section-item-file">' +
-                    '<input type="file" accept="image/*" data-target="sec-item-thumb-' + id + '">' +
+                    '<input type="file" accept="image/*" multiple data-target="sec-item-thumb-' + id + '" data-bulk="section" data-section-id="' + sectionId + '">' +
                     '<div class="img-thumb" id="sec-item-thumb-' + id + '"></div>' +
                     '<label class="img-fit-toggle"><input type="checkbox" class="item-cover" checked> 채우기</label>' +
                 '</div>' +
@@ -366,6 +755,9 @@ var App = (function() {
                 '</div>' +
             '</div>';
         list.appendChild(div);
+        markDirtySoon();
+        updateTranslateEstimate();
+        return id;
     }
 
     /** 섹션 삭제 시 _textData 동기화 */
@@ -388,6 +780,8 @@ var App = (function() {
                 }
             }
         }
+        markDirtySoon();
+        updateTranslateEstimate();
     }
 
 
@@ -412,8 +806,11 @@ var App = (function() {
             '</div>' +
             '<div class="form-row"><label>상품명</label><input type="text" class="prod-name" placeholder="예: 냉동 갈치"></div>' +
             '<div class="form-row"><label>상품 설명</label><textarea class="prod-desc" rows="2" placeholder="상품 소개"></textarea></div>' +
-            '<div class="form-row"><label>이미지</label><div class="img-upload-stack"><input type="file" accept="image/*" data-target="prod-img-' + id + '"><div class="img-thumb" id="prod-img-' + id + '"></div><label class="img-fit-toggle"><input type="checkbox" class="item-cover" checked> 채우기</label></div></div>';
+            '<div class="form-row"><label>이미지</label><div class="img-upload-stack"><input type="file" accept="image/*" multiple data-target="prod-img-' + id + '" data-bulk="product"><div class="img-thumb" id="prod-img-' + id + '"></div><label class="img-fit-toggle"><input type="checkbox" class="item-cover" checked> 채우기</label></div></div>';
         c.appendChild(div);
+        markDirtySoon();
+        updateTranslateEstimate();
+        return id;
     }
 
     function addCert() {
@@ -431,15 +828,24 @@ var App = (function() {
                 '</div>' +
             '</div>' +
             '<div class="form-row"><label>제목 (선택)</label><input type="text" class="cert-title" placeholder="예: HACCP 인증서"></div>' +
-            '<div class="form-row"><label>이미지</label><div class="img-upload-stack"><input type="file" accept="image/*" data-target="cert-img-' + id + '"><div class="img-thumb" id="cert-img-' + id + '"></div><label class="img-fit-toggle"><input type="checkbox" class="item-cover" checked> 채우기</label></div></div>';
+            '<div class="form-row"><label>이미지</label><div class="img-upload-stack"><input type="file" accept="image/*" multiple data-target="cert-img-' + id + '" data-bulk="cert"><div class="img-thumb" id="cert-img-' + id + '"></div><label class="img-fit-toggle"><input type="checkbox" class="item-cover" checked> 채우기</label></div></div>';
         c.appendChild(div);
+        markDirtySoon();
+        updateTranslateEstimate();
+        return id;
     }
 
 
     // ==========================================================
     //  삭제 / 순서 이동
     // ==========================================================
-    function removeEl(id) { var el = document.getElementById(id); if (el) el.remove(); }
+    function removeEl(id) {
+        var el = document.getElementById(id);
+        if (!el) return;
+        el.remove();
+        markDirtySoon();
+        updateTranslateEstimate();
+    }
 
     function moveItem(cid, itemUid, dir) {
         var c = document.getElementById(cid);
@@ -448,6 +854,7 @@ var App = (function() {
             if (parseInt(items[i].dataset.uid) === itemUid) {
                 if (dir === -1 && i > 0) c.insertBefore(items[i], items[i - 1]);
                 else if (dir === 1 && i < items.length - 1) c.insertBefore(items[i + 1], items[i]);
+                markDirtySoon();
                 return;
             }
         }
@@ -472,6 +879,7 @@ var App = (function() {
         var sections = [];
         for (var i = 0; i < secEls.length; i++) {
             var sec = secEls[i];
+            var fixedTitleIndex = getFixedTitleIndex(sec);
             var items = [];
             var itemEls = sec.querySelectorAll('.section-item');
             for (var j = 0; j < itemEls.length; j++) {
@@ -487,7 +895,7 @@ var App = (function() {
             var sText = (t.sections && t.sections[i]) ? t.sections[i] : { title: '', desc: '' };
             sections.push({
                 step: i + 1,
-                title: sText.title || '',
+                title: fixedTitleIndex !== null ? getDefaultSectionTitle(targetLang, fixedTitleIndex) : (sText.title || ''),
                 description: sText.desc || '',
                 items: items
             });
@@ -534,6 +942,7 @@ var App = (function() {
     /** DB 저장용 전체 데이터 (이미지 + 모든 언어 텍스트) */
     function getFullData() {
         saveCurrentTexts();
+        ensureAllFixedSectionTitles();
 
         // 이미지 수집
         var secEls = document.querySelectorAll('#sections-container > .card-section');
@@ -845,83 +1254,334 @@ var App = (function() {
     function updateCurrentLabel() {
         var el = document.getElementById('project-current');
         if (!el) return;
-        el.textContent = _currentProjectId ? '현재 프로젝트 ID: ' + _currentProjectId : '새 프로젝트 (미저장)';
+        var label = _currentProjectId ? '현재 프로젝트 ID: ' + _currentProjectId : '새 프로젝트 (미저장)';
+        if (_lastSavedAt) label += ' · 마지막 저장 ' + _lastSavedAt;
+        el.textContent = label;
+    }
+
+    function setSaveStatus(text, state) {
+        var el = document.getElementById('save-status');
+        if (!el) return;
+        el.textContent = text;
+        el.classList.remove('dirty', 'saving', 'saved', 'error');
+        if (state) el.classList.add(state);
+    }
+
+    function getCurrentSaveSignature() {
+        var fullData = getFullData();
+        var name = (_textData.ko && _textData.ko.company_name) || '';
+        return buildSaveSignature(name, _currentLang, fullData);
+    }
+
+    function hasUnsavedChanges() {
+        var fullData = getFullData();
+        if (!_lastSavedSignature) return hasMeaningfulContent(fullData);
+        var name = (_textData.ko && _textData.ko.company_name) || '';
+        return buildSaveSignature(name, _currentLang, fullData) !== _lastSavedSignature;
+    }
+
+    function markDirtySoon() {
+        if (_isRestoringProject || _isOpeningProject) return;
+        if (_dirtyCheckTimer) clearTimeout(_dirtyCheckTimer);
+        _dirtyCheckTimer = setTimeout(function() {
+            if (_isRestoringProject || _isOpeningProject) return;
+            if (hasUnsavedChanges()) setSaveStatus('변경됨', 'dirty');
+            else setSaveStatus(_lastSavedAt ? '저장 완료 ' + _lastSavedAt : '저장 대기', 'saved');
+        }, 250);
+    }
+
+    function confirmUnsavedChanges() {
+        if (!hasUnsavedChanges()) return true;
+        return confirm('저장되지 않은 변경사항이 있습니다. 계속할까요?');
+    }
+
+    function hasMeaningfulContent(fullData) {
+        var texts = (fullData && fullData.texts) || {};
+        for (var i = 0; i < LANGS.length; i++) {
+            if (countTextDataChars(texts[LANGS[i]]) > 0) return true;
+        }
+
+        var images = (fullData && fullData.images) || {};
+        if (images.mainImage) return true;
+
+        var sections = images.sections || [];
+        for (var s = 0; s < sections.length; s++) {
+            var items = sections[s].items || sections[s] || [];
+            for (var si = 0; si < items.length; si++) {
+                if (items[si]) return true;
+            }
+        }
+
+        var products = images.products || [];
+        for (var p = 0; p < products.length; p++) {
+            if (products[p] && (products[p].src || typeof products[p] === 'string' && products[p])) return true;
+        }
+
+        var certificates = images.certificates || [];
+        for (var c = 0; c < certificates.length; c++) {
+            if (certificates[c] && (certificates[c].src || typeof certificates[c] === 'string' && certificates[c])) return true;
+        }
+
+        return false;
+    }
+
+    function buildSaveSignature(name, lang, fullData) {
+        return JSON.stringify({ name: name || '', data: fullData || {} });
+    }
+
+    function formatSaveTime() {
+        var d = new Date();
+        return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+    }
+
+    function makeTempProjectName() {
+        var d = new Date();
+        return '임시저장 ' +
+            String(d.getMonth() + 1).padStart(2, '0') + '/' +
+            String(d.getDate()).padStart(2, '0') + ' ' +
+            String(d.getHours()).padStart(2, '0') + ':' +
+            String(d.getMinutes()).padStart(2, '0');
+    }
+
+    function autoSaveBeforeNavigation(statusText) {
+        if (typeof API === 'undefined') return Promise.resolve({ skipped: true });
+        var waitForCurrentSave = (_isSaving && _savePromise) ? _savePromise.catch(function() {}) : Promise.resolve({ skipped: true });
+
+        return waitForCurrentSave.then(function() {
+            var snapshot = captureProjectSnapshot();
+            var changed = snapshot.signature !== _lastSavedSignature;
+            if (!_lastSavedSignature && !snapshot.hasContent) return { skipped: true };
+            if (_lastSavedSignature && !changed) return { skipped: true };
+            return saveProjectSnapshot(snapshot, {
+                adoptCreated: false,
+                statusText: statusText || '이동 전 저장 중...'
+            });
+        });
+    }
+
+    function captureProjectSnapshot() {
+        var fullData = getFullData();
+        var name = (_textData.ko && _textData.ko.company_name) || '';
+        return {
+            projectId: _formProjectId,
+            lang: _currentLang,
+            name: name,
+            fullData: fullData,
+            signature: buildSaveSignature(name, _currentLang, fullData),
+            hasContent: hasMeaningfulContent(fullData)
+        };
+    }
+
+    function saveProjectSnapshot(snapshot, options) {
+        options = options || {};
+        if (!snapshot || !snapshot.hasContent) return Promise.resolve({ skipped: true });
+        if (_isSaving) return _savePromise || Promise.resolve({ skipped: true });
+
+        _isSaving = true;
+        setSaveStatus(options.statusText || '저장 중...', 'saving');
+
+        var request = snapshot.projectId ?
+            API.updateProject(snapshot.projectId, snapshot.name, snapshot.lang, snapshot.fullData) :
+            API.createProject(snapshot.name, snapshot.lang, snapshot.fullData);
+
+        _savePromise = request.then(function(res) {
+            if (!snapshot.projectId && res && res.id && options.adoptCreated !== false) {
+                _currentProjectId = res.id;
+                _formProjectId = res.id;
+            }
+            _lastSavedSignature = snapshot.signature;
+            _lastSavedAt = formatSaveTime();
+            setSaveStatus('저장 완료 ' + _lastSavedAt, 'saved');
+            updateCurrentLabel();
+            if (options.refreshList !== false) loadProjectList();
+            return res || {};
+        }).catch(function(err) {
+            setSaveStatus('저장 실패', 'error');
+            throw err;
+        }).finally(function() {
+            _isSaving = false;
+            _savePromise = null;
+        });
+
+        return _savePromise;
+    }
+
+    function persistProject(options) {
+        options = options || {};
+        if (typeof API === 'undefined') {
+            if (!options.silent) toast('서버 모드에서만 사용 가능합니다.');
+            return Promise.reject(new Error('서버 모드에서만 사용 가능합니다.'));
+        }
+        if (_isRestoringProject || (_isOpeningProject && !options.allowDuringNavigation)) return Promise.resolve({ skipped: true });
+        if (_isSaving) return _savePromise || Promise.resolve({ skipped: true });
+
+        var snapshot = captureProjectSnapshot();
+        var wasNewProject = !snapshot.projectId;
+
+        if (options.requireContent && !snapshot.projectId && !snapshot.hasContent) {
+            return Promise.resolve({ skipped: true });
+        }
+
+        if (options.skipUnchanged && snapshot.signature === _lastSavedSignature) {
+            return Promise.resolve({ skipped: true });
+        }
+
+        return saveProjectSnapshot(snapshot, {
+            statusText: options.statusText || (options.silent ? '자동 저장 중...' : '저장 중...'),
+            refreshList: options.refreshList,
+            adoptCreated: options.adoptCreated
+        }).then(function(res) {
+            if (res && res.skipped) return res;
+            if (options.silent) setSaveStatus('자동 저장 ' + _lastSavedAt, 'saved');
+            updateCurrentLabel();
+            if (!options.silent) {
+                toast(wasNewProject ? '새 프로젝트가 생성되었습니다. (ID: ' + (res && res.id ? res.id : _currentProjectId) + ')' : '프로젝트가 저장되었습니다.');
+            }
+            return res || {};
+        }).catch(function(err) {
+            if (!options.silent) toast('저장 실패');
+            throw err;
+        });
     }
 
     function saveProject() {
-        if (typeof API === 'undefined') { toast('서버 모드에서만 사용 가능합니다.'); return; }
-        var fullData = getFullData();
-        var name = (_textData.ko && _textData.ko.company_name) || '';
+        persistProject({ silent: false }).catch(function() {});
+    }
 
-        if (_currentProjectId) {
-            API.updateProject(_currentProjectId, name, _currentLang, fullData).then(function() {
-                toast('프로젝트가 저장되었습니다.');
-                loadProjectList();
-            }).catch(function() { toast('저장 실패'); });
-        } else {
-            API.createProject(name, _currentLang, fullData).then(function(res) {
-                _currentProjectId = res.id;
-                toast('새 프로젝트가 생성되었습니다. (ID: ' + res.id + ')');
-                loadProjectList();
-            }).catch(function() { toast('생성 실패'); });
-        }
+    function startAutoSave() {
+        if (_autoSaveTimer) clearInterval(_autoSaveTimer);
+        _autoSaveTimer = setInterval(function() {
+            persistProject({
+                silent: true,
+                skipUnchanged: true,
+                requireContent: true,
+                refreshList: false
+            }).then(function(res) {
+                if (res && !res.skipped) loadProjectList();
+            }).catch(function() {});
+        }, AUTOSAVE_INTERVAL_MS);
     }
 
     function openProject(id) {
         if (typeof API === 'undefined') return;
-        API.getProject(id).then(function(row) {
+        if (_isOpeningProject) return;
+        if (_currentProjectId === id && !hasUnsavedChanges()) return;
+        _isOpeningProject = true;
+        var previousProjectId = _currentProjectId;
+        autoSaveBeforeNavigation('현재 프로젝트 저장 중...').then(function() {
+            _saveVersion++;
+            _currentProjectId = null;
+            _formProjectId = null;
+            setSaveStatus('불러오는 중...', 'saving');
+            return API.getProject(id);
+        }).then(function(row) {
             var fullData = JSON.parse(row.data);
-            _currentProjectId = row.id;
             restoreFullData(fullData);
+            _currentProjectId = row.id;
+            _formProjectId = row.id;
+            var restoredData = getFullData();
+            _lastSavedSignature = buildSaveSignature((_textData.ko && _textData.ko.company_name) || '', _currentLang, restoredData);
+            _lastSavedAt = '';
+            setSaveStatus('저장 완료', 'saved');
+            updateTranslateEstimate();
             toast('"' + (row.company_name || '') + '" 프로젝트를 불러왔습니다.');
             loadProjectList();
-        }).catch(function() { toast('프로젝트를 불러올 수 없습니다.'); });
+        }).catch(function() {
+            _currentProjectId = previousProjectId;
+            _formProjectId = previousProjectId;
+            setSaveStatus('불러오기 실패', 'error');
+            toast('프로젝트를 불러올 수 없습니다.');
+        }).finally(function() {
+            _isOpeningProject = false;
+        });
     }
 
     function deleteProject(id) {
+        if (_isSaving) { toast('저장 중입니다. 잠시 후 다시 시도하세요.'); return; }
+        if (_currentProjectId === id && !confirmUnsavedChanges()) return;
         if (!confirm('정말 삭제하시겠습니까?')) return;
+        _saveVersion++;
         API.deleteProject(id).then(function() {
-            if (_currentProjectId === id) { _currentProjectId = null; updateCurrentLabel(); }
+            if (_currentProjectId === id) {
+                _currentProjectId = null;
+                _formProjectId = null;
+                _lastSavedSignature = '';
+                _lastSavedAt = '';
+                setSaveStatus('저장 대기', 'saved');
+                updateCurrentLabel();
+            }
             toast('프로젝트가 삭제되었습니다.');
             loadProjectList();
         }).catch(function() { toast('삭제 실패'); });
     }
 
     function newProject() {
-        _currentProjectId = null;
-        initTextData();
-        _currentLang = 'ko';
-        document.querySelector('input[name="lang"][value="ko"]').checked = true;
+        if (_isOpeningProject) return;
+        _isOpeningProject = true;
+        autoSaveBeforeNavigation('현재 프로젝트 저장 중...').then(function() {
+            _isRestoringProject = true;
+            _saveVersion++;
+            if (_dirtyCheckTimer) clearTimeout(_dirtyCheckTimer);
+            try {
+                _currentProjectId = null;
+                _formProjectId = null;
+                _lastSavedSignature = '';
+                _lastSavedAt = '';
+                initTextData();
+                _currentLang = 'ko';
+                setActiveLangTab('ko');
 
-        setVal('inp-company-name', '');
-        setVal('inp-company-intro', '');
-        var mainImg = document.getElementById('inp-main-image');
-        if (mainImg) mainImg.innerHTML = '';
+                var tempName = makeTempProjectName();
+                _textData.ko.company_name = tempName;
+                setVal('inp-company-name', tempName);
+                setVal('inp-company-intro', '');
+                var mainImg = document.getElementById('inp-main-image');
+                if (mainImg) clearThumb('inp-main-image');
 
-        document.getElementById('sections-container').innerHTML = '';
-        for (var i = 0; i < DEFAULT_SECTIONS.length; i++) {
-            var secId = addSection(DEFAULT_SECTIONS[i]);
-            addSectionItem(secId);
-            addSectionItem(secId);
-        }
+                document.getElementById('sections-container').innerHTML = '';
+                for (var i = 0; i < DEFAULT_SECTIONS.length; i++) {
+                    var secId = addSection(getDefaultSectionTitle('ko', i), i);
+                    addSectionItem(secId);
+                    addSectionItem(secId);
+                }
 
-        document.getElementById('products-container').innerHTML = '';
-        addProduct();
-        document.getElementById('certs-container').innerHTML = '';
+                document.getElementById('products-container').innerHTML = '';
+                addProduct();
+                document.getElementById('certs-container').innerHTML = '';
+            } finally {
+                _isRestoringProject = false;
+            }
 
-        toast('새 프로젝트가 준비되었습니다.');
-        updateCurrentLabel();
-        loadProjectList();
+            updateTranslateEstimate();
+            updateCurrentLabel();
+            var snapshot = captureProjectSnapshot();
+            return saveProjectSnapshot(snapshot, {
+                statusText: '새 프로젝트 저장 중...'
+            });
+        }).then(function() {
+            toast('새 프로젝트가 생성되었습니다.');
+            updateCurrentLabel();
+            loadProjectList();
+        }).catch(function() {
+            setSaveStatus('새 프로젝트 생성 실패', 'error');
+            toast('새 프로젝트를 생성할 수 없습니다.');
+        }).finally(function() {
+            _isOpeningProject = false;
+        });
     }
 
     /** DB에서 불러온 fullData → 폼 복원 */
     function restoreFullData(fullData) {
+        _isRestoringProject = true;
+        if (_dirtyCheckTimer) clearTimeout(_dirtyCheckTimer);
+        try {
+
         // 텍스트 복원
         if (fullData.texts) {
-            _textData = fullData.texts;
+            _textData = cloneData(fullData.texts);
             // 빠진 언어가 있으면 빈 데이터로 채움
             for (var i = 0; i < LANGS.length; i++) {
-                if (!_textData[LANGS[i]]) _textData[LANGS[i]] = emptyTextData();
+                if (!_textData[LANGS[i]]) _textData[LANGS[i]] = emptyTextData(LANGS[i]);
             }
         } else {
             // 구버전 데이터 호환 (texts 없이 저장된 경우)
@@ -931,14 +1591,15 @@ var App = (function() {
                 _textData.ko.company_intro = fullData.company.intro || '';
             }
         }
+        ensureDefaultFixedSectionTitles();
 
         _currentLang = 'ko';
-        document.querySelector('input[name="lang"][value="ko"]').checked = true;
+        setActiveLangTab('ko');
 
         // 이미지 복원 (섹션 구조 재생성)
         var images = fullData.images || {};
 
-        restoreImg('inp-main-image', images.mainImage);
+        restoreImg('inp-main-image', images.mainImage, true);
 
         // 섹션
         document.getElementById('sections-container').innerHTML = '';
@@ -946,7 +1607,9 @@ var App = (function() {
         var secCount = Math.max(secImages.length, (_textData.ko.sections || []).length);
         for (var i = 0; i < secCount; i++) {
             var koSec = (_textData.ko.sections && _textData.ko.sections[i]) || { title: '', desc: '', captions: [] };
-            var secId = addSection(koSec.title);
+            var fixedTitleIndex = (koSec.fixedTitleIndex !== undefined && koSec.fixedTitleIndex !== null && koSec.fixedTitleIndex !== '') ? Number(koSec.fixedTitleIndex) : null;
+            if (isNaN(fixedTitleIndex)) fixedTitleIndex = null;
+            var secId = addSection(fixedTitleIndex !== null ? getDefaultSectionTitle('ko', fixedTitleIndex) : koSec.title, fixedTitleIndex);
             var secEl = document.getElementById('section-' + secId);
             if (secEl.querySelector('.sec-desc')) secEl.querySelector('.sec-desc').value = koSec.desc || '';
             var list = document.getElementById('sec-items-' + secId);
@@ -1001,6 +1664,9 @@ var App = (function() {
         }
 
         loadCurrentTexts();
+        } finally {
+        _isRestoringProject = false;
+        }
     }
 
 
@@ -1011,12 +1677,84 @@ var App = (function() {
         document.addEventListener('change', function(e) {
             if (e.target.type !== 'file') return;
             if (typeof API === 'undefined') return;
-            var file = e.target.files && e.target.files[0];
+            var files = e.target.files ? Array.prototype.slice.call(e.target.files) : [];
             var tid = e.target.getAttribute('data-target');
-            if (!file || !tid) return;
-            API.uploadImage(file).then(function(res) {
-                setThumbWithDelete(tid, res.url);
+            if (files.length === 0 || !tid) return;
+            handleImageFiles(files, tid, e.target.getAttribute('data-bulk'), e.target.getAttribute('data-section-id')).then(function() {
+                e.target.value = '';
             }).catch(function() { toast('이미지 업로드 실패'); });
+        });
+
+        document.addEventListener('dragover', function(e) {
+            var thumb = e.target.closest && e.target.closest('.img-thumb');
+            if (!thumb) return;
+            e.preventDefault();
+            thumb.classList.add('dragover');
+        });
+
+        document.addEventListener('dragleave', function(e) {
+            var thumb = e.target.closest && e.target.closest('.img-thumb');
+            if (thumb) thumb.classList.remove('dragover');
+        });
+
+        document.addEventListener('drop', function(e) {
+            var thumb = e.target.closest && e.target.closest('.img-thumb');
+            if (!thumb || typeof API === 'undefined') return;
+            e.preventDefault();
+            thumb.classList.remove('dragover');
+
+            var files = Array.prototype.slice.call(e.dataTransfer.files || []).filter(function(file) {
+                return file.type && file.type.indexOf('image/') === 0;
+            });
+            if (files.length === 0) return;
+
+            var input = thumb.parentElement ? thumb.parentElement.querySelector('input[type="file"]') : null;
+            var bulk = input ? input.getAttribute('data-bulk') : '';
+            var sectionId = input ? input.getAttribute('data-section-id') : '';
+            handleImageFiles(files, thumb.id, bulk, sectionId).catch(function() { toast('이미지 업로드 실패'); });
+        });
+    }
+
+    function createExtraImageTarget(bulkKind, sectionId) {
+        if (bulkKind === 'section' && sectionId) {
+            addSectionItem(sectionId);
+            var list = document.getElementById('sec-items-' + sectionId);
+            var item = list ? list.querySelector('.section-item:last-child') : null;
+            var thumb = item ? item.querySelector('.img-thumb') : null;
+            return thumb ? thumb.id : '';
+        }
+        if (bulkKind === 'product') {
+            var productId = addProduct();
+            return productId ? 'prod-img-' + productId : '';
+        }
+        if (bulkKind === 'cert') {
+            var certId = addCert();
+            return certId ? 'cert-img-' + certId : '';
+        }
+        return '';
+    }
+
+    function uploadImageToTarget(file, targetId) {
+        return API.uploadImage(file).then(function(res) {
+            setThumbWithDelete(targetId, res.url);
+        });
+    }
+
+    function handleImageFiles(files, firstTargetId, bulkKind, sectionId) {
+        var chain = Promise.resolve();
+        for (var i = 0; i < files.length; i++) {
+            (function(index) {
+                chain = chain.then(function() {
+                    var targetId = index === 0 ? firstTargetId : createExtraImageTarget(bulkKind, sectionId);
+                    if (!targetId) return null;
+                    return uploadImageToTarget(files[index], targetId);
+                });
+            })(i);
+        }
+
+        return chain.then(function() {
+            markDirtySoon();
+            toast(files.length > 1 ? files.length + '개 이미지를 업로드했습니다.' : '이미지를 업로드했습니다.');
         });
     }
 
@@ -1039,6 +1777,7 @@ var App = (function() {
             container.classList.remove('img-thumb--has');
             var fileInput = container.parentElement.querySelector('input[type="file"]');
             if (fileInput) fileInput.value = '';
+            markDirtySoon();
         };
         container.appendChild(del);
     }
@@ -1048,9 +1787,21 @@ var App = (function() {
     //  유틸리티
     // ==========================================================
     function setVal(id, v) { var el = document.getElementById(id); if (el) el.value = v || ''; }
-    function restoreImg(id, src) {
-        if (!src) return;
+    function restoreImg(id, src, clearWhenEmpty) {
+        if (!src) {
+            if (clearWhenEmpty) clearThumb(id);
+            return;
+        }
         setThumbWithDelete(id, src);
+    }
+
+    function clearThumb(id) {
+        var container = document.getElementById(id);
+        if (!container) return;
+        container.innerHTML = '';
+        container.classList.remove('img-thumb--has');
+        var fileInput = container.parentElement ? container.parentElement.querySelector('input[type="file"]') : null;
+        if (fileInput) fileInput.value = '';
     }
 
     function esc(str) {
@@ -1078,6 +1829,7 @@ var App = (function() {
         moveItemIn: moveItemIn,
         switchTab: switchTab,
         switchLang: switchLang,
+        translateCurrentFromKorean: translateCurrentFromKorean,
         refreshPreview: refreshPreview,
         downloadImage: downloadImage,
         saveProject: saveProject,

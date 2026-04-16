@@ -19,6 +19,7 @@
 ├── web.config
 ├── install-service.js
 ├── uninstall-service.js
+├── .env                 ← DeepL API 키 설정 파일
 ├── index.html
 ├── css/
 ├── js/
@@ -30,6 +31,9 @@
 ├── node_modules/        ← npm install로 재설치
 └── backups/             ← 자동 생성됨
 ```
+
+> `.env`는 Git에 올라가지 않으므로 운영 PC에는 직접 생성/복사해야 합니다.
+> 내용 예시: `DEEPL_API_KEY=발급받은_DeepL_API_KEY`
 
 ---
 
