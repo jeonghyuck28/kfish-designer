@@ -17,7 +17,15 @@ var API = (function() {
         if (body) opts.body = JSON.stringify(body);
         return fetch(BASE + url, opts).then(function(res) {
             return res.text().then(function(text) {
-                var data = text ? JSON.parse(text) : {};
+                var data = {};
+                if (text) {
+                    try {
+                        data = JSON.parse(text);
+                    } catch (e) {
+                        var preview = text.replace(/\s+/g, ' ').slice(0, 80);
+                        throw new Error('API가 JSON이 아닌 응답을 반환했습니다. IIS 프록시 또는 Node 서버 연결을 확인하세요. 응답: ' + preview);
+                    }
+                }
                 if (!res.ok) throw new Error((data && data.error) ? data.error : 'API 오류: ' + res.status);
                 return data;
             });

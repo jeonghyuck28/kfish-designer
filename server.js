@@ -236,6 +236,16 @@ function setByPath(target, pathParts, value) {
     cursor[pathParts[pathParts.length - 1]] = value;
 }
 
+function parseDeepLJson(text, response, label) {
+    try {
+        return text ? JSON.parse(text) : {};
+    } catch (e) {
+        const contentType = response.headers.get('content-type') || 'unknown';
+        const preview = (text || '').replace(/\s+/g, ' ').slice(0, 120);
+        throw new Error(label + ' 응답이 JSON이 아닙니다. 상태: ' + response.status + ', Content-Type: ' + contentType + ', 응답: ' + preview);
+    }
+}
+
 async function fetchDeepLUsage() {
     const config = getDeepLConfig();
     if (!config.apiKey) throw new Error('DeepL API 키가 설정되지 않았습니다.');
@@ -251,7 +261,7 @@ async function fetchDeepLUsage() {
         throw new Error('DeepL 서버에 연결할 수 없습니다. 운영 서버의 외부 HTTPS/DNS/방화벽 설정을 확인하세요.');
     }
     const text = await response.text();
-    const data = text ? JSON.parse(text) : {};
+    const data = parseDeepLJson(text, response, 'DeepL 사용량 조회');
 
     if (!response.ok) {
         throw new Error(data.message || data.error || ('DeepL 사용량 조회 실패: ' + response.status));
@@ -286,7 +296,7 @@ async function translateTexts(fields, sourceLang, targetLang) {
             throw new Error('DeepL 서버에 연결할 수 없습니다. 운영 서버의 외부 HTTPS/DNS/방화벽 설정을 확인하세요.');
         }
         const text = await response.text();
-        const data = text ? JSON.parse(text) : {};
+        const data = parseDeepLJson(text, response, 'DeepL 번역');
 
         if (!response.ok) {
             if (response.status === 456) throw new Error('DeepL 월 사용량 한도를 초과했습니다.');
