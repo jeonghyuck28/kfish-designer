@@ -13,7 +13,6 @@ var App = (function() {
 
     var TPL_IMAGES = {
         topBg: 'images/top-bg.jpg',
-        headerText: 'images/header-text.png',
         logoParticle: 'images/logo-particle.png',
         companyBg: 'images/company-bg.jpg'
     };
@@ -23,6 +22,24 @@ var App = (function() {
         en: { why_title: 'Why <em>K·FISH</em>?', why_desc: 'K·FISH is <strong>Korea\'s national seafood export brand</strong>,<br>certified for quality by the Korean government.<br>Only products that meet the strictest standards bear this name.', products: '<em>K·FISH</em> Approved Products', certs: 'Quality Certificates' },
         cn: { why_title: '为什么选择 <em>K·FISH</em>?', why_desc: 'K·FISH是韩国政府认证的<br><strong>水产品出口综合品牌</strong>。<br>只有通过严格标准的水产品才能使用此名称。', products: '<em>K·FISH</em> 认证产品', certs: '质量认证' },
         jp: { why_title: 'なぜ <em>K·FISH</em> なのか?', why_desc: 'K·FISHは韓国政府が品質を認証した<br><strong>水産物輸出統合ブランド</strong>です。<br>厳しい基準を通過した水産物だけを取り扱っています。', products: '<em>K·FISH</em> 承認商品', certs: '品質認証書' }
+    };
+    var HEADER_TEXTS = {
+        ko: [
+            '세계의 소비자를 위한 수산물 브랜드 <strong>K·FISH</strong>',
+            '대한민국 정부가 품질을 인증하는 수산물 수출통합브랜드 <strong>K·FISH</strong>'
+        ],
+        en: [
+            'Seafood brand for global consumers <strong>K·FISH</strong>',
+            'Korean government-certified seafood export brand <strong>K·FISH</strong>'
+        ],
+        cn: [
+            '面向全球消费者的水产品品牌 <strong>K·FISH</strong>',
+            '韩国政府品质认证的水产品出口综合品牌 <strong>K·FISH</strong>'
+        ],
+        jp: [
+            '世界の消費者のための水産物ブランド <strong>K·FISH</strong>',
+            '韓国政府が品質認証する水産物輸出ブランド <strong>K·FISH</strong>'
+        ]
     };
     var DOWNLOAD_QUALITY_PRESETS = {
         low: { name: '저용량', jpegQuality: 0.55 },
@@ -1010,18 +1027,21 @@ var App = (function() {
 
     function buildHTML(data, isExport) {
         var labels = LABELS[data.lang] || LABELS.ko;
+        var headerTexts = HEADER_TEXTS[data.lang] || HEADER_TEXTS.ko;
         var topBg = isExport ? (_imageCache.topBg || TPL_IMAGES.topBg) : TPL_IMAGES.topBg;
-        var hdrTxt = isExport ? (_imageCache.headerText || TPL_IMAGES.headerText) : TPL_IMAGES.headerText;
         var logoP = isExport ? (_imageCache.logoParticle || TPL_IMAGES.logoParticle) : TPL_IMAGES.logoParticle;
         var compBg = isExport ? (_imageCache.companyBg || TPL_IMAGES.companyBg) : TPL_IMAGES.companyBg;
 
-        var h = '<div class="tpl">\n';
+        var h = '<div class="tpl lang-' + esc(data.lang || 'ko') + '">\n';
 
         // 상단
         h += '<div class="tpl-header">\n';
         h += '  <img class="tpl-header-bg" src="' + topBg + '" alt="">\n';
         h += '  <div class="tpl-header-overlay">\n';
-        h += '    <img class="tpl-header-text" src="' + hdrTxt + '" alt="">\n';
+        h += '    <div class="tpl-header-text">\n';
+        h += '      <div>' + headerTexts[0] + '</div>\n';
+        h += '      <div>' + headerTexts[1] + '</div>\n';
+        h += '    </div>\n';
         h += '    <img class="tpl-header-particle" src="' + logoP + '" alt="K·FISH">\n';
         h += '  </div>\n';
         h += '  <div class="tpl-company-name-wrap">\n';

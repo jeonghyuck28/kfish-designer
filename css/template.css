@@ -18,7 +18,7 @@
     letter-spacing: -0.3px;
 }
 
-/* ===== 상단: 수중 배경 + 텍스트 이미지 + 파티클 로고 ===== */
+/* ===== 상단: 수중 배경 + 텍스트 + 파티클 로고 ===== */
 .tpl-header {
     position: relative;
     width: 900px;
@@ -38,10 +38,30 @@
     align-items: center;
     justify-content: center;
     text-align: center;
-    padding: 40px 60px;
+    padding: 40px 20px;
+    box-sizing: border-box;
 }
 .tpl-header-text {
+    width: 860px;
     margin-bottom: 220px;
+    color: #fff;
+    font-size: 31px;
+    font-weight: 300;
+    line-height: 1.35;
+    text-align: center;
+    text-shadow: 0 2px 4px rgba(0,0,0,0.45);
+    letter-spacing: 0;
+    white-space: nowrap;
+}
+.tpl-header-text div {
+    display: block;
+    white-space: nowrap;
+}
+.tpl-header-text strong {
+    font-weight: 800;
+}
+.tpl.lang-en .tpl-header-text {
+    font-size: 29px;
 }
 .tpl-header-particle {
     position: absolute;
@@ -194,6 +214,9 @@
     font-size: 40px;
     font-weight: 700;
     letter-spacing: -0.5px;
+}
+.tpl.lang-en .tpl-pill {
+    font-size: 30px;
 }
 
 /* 섹션 아이템 그리드 */
