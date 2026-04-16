@@ -241,10 +241,15 @@ async function fetchDeepLUsage() {
     if (!config.apiKey) throw new Error('DeepL API 키가 설정되지 않았습니다.');
     if (typeof fetch !== 'function') throw new Error('현재 Node.js 버전에서 fetch를 사용할 수 없습니다.');
 
-    const response = await fetch(config.baseUrl + '/v2/usage', {
-        method: 'GET',
-        headers: { Authorization: 'DeepL-Auth-Key ' + config.apiKey }
-    });
+    let response;
+    try {
+        response = await fetch(config.baseUrl + '/v2/usage', {
+            method: 'GET',
+            headers: { Authorization: 'DeepL-Auth-Key ' + config.apiKey }
+        });
+    } catch (e) {
+        throw new Error('DeepL 서버에 연결할 수 없습니다. 운영 서버의 외부 HTTPS/DNS/방화벽 설정을 확인하세요.');
+    }
     const text = await response.text();
     const data = text ? JSON.parse(text) : {};
 
@@ -267,14 +272,19 @@ async function translateTexts(fields, sourceLang, targetLang) {
         params.append('target_lang', targetLang);
         params.append('preserve_formatting', '1');
 
-        const response = await fetch(config.baseUrl + '/v2/translate', {
-            method: 'POST',
-            headers: {
-                Authorization: 'DeepL-Auth-Key ' + config.apiKey,
-                'Content-Type': 'application/x-www-form-urlencoded'
-            },
-            body: params
-        });
+        let response;
+        try {
+            response = await fetch(config.baseUrl + '/v2/translate', {
+                method: 'POST',
+                headers: {
+                    Authorization: 'DeepL-Auth-Key ' + config.apiKey,
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                body: params
+            });
+        } catch (e) {
+            throw new Error('DeepL 서버에 연결할 수 없습니다. 운영 서버의 외부 HTTPS/DNS/방화벽 설정을 확인하세요.');
+        }
         const text = await response.text();
         const data = text ? JSON.parse(text) : {};
 

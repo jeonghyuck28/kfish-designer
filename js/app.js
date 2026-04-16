@@ -459,7 +459,8 @@ var App = (function() {
             renderDeepLUsage(usage);
         }).catch(function(err) {
             if (el) {
-                el.textContent = 'DeepL 사용량 확인 실패';
+                el.textContent = err && err.message ? 'DeepL 확인 실패: ' + err.message : 'DeepL 사용량 확인 실패';
+                el.title = err && err.message ? err.message : '';
                 el.classList.add('warn');
             }
             console.warn(err);
