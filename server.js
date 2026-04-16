@@ -412,6 +412,15 @@ app.get('/api/backup', (req, res) => {
 });
 
 
+// ===== API 미등록 경로 보호: /api 요청은 HTML로 fallback하지 않음 =====
+app.use('/api', (req, res) => {
+    res.status(404).json({
+        error: 'API 경로를 찾을 수 없습니다. 운영 서버가 최신 코드로 재시작되었는지 확인하세요.',
+        path: req.originalUrl
+    });
+});
+
+
 // ===== SPA 라우팅: 모든 경로 → index.html =====
 app.get('/{*splat}', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
