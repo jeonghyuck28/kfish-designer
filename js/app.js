@@ -155,7 +155,9 @@ var App = (function() {
             canvas.width = img.naturalWidth;
             canvas.height = img.naturalHeight;
             canvas.getContext('2d').drawImage(img, 0, 0);
-            callback(canvas.toDataURL('image/jpeg', 0.9));
+            // PNG는 투명도 보존, 그 외는 JPEG
+            var isPng = url.toLowerCase().indexOf('.png') !== -1;
+            callback(isPng ? canvas.toDataURL('image/png') : canvas.toDataURL('image/jpeg', 0.9));
         };
         img.onerror = function() { callback(''); };
         img.src = url;
@@ -1215,7 +1217,8 @@ var App = (function() {
             html2canvas(previewArea, { width: 900, scale: 1, useCORS: true, backgroundColor: null }).then(function(canvas) {
                 var a = document.createElement('a');
                 a.href = canvas.toDataURL('image/jpeg', preset.jpegQuality);
-                a.download = (data.company.name || 'kfish_시안') + '_' + data.lang + '.jpg';
+                var langLabel = { ko: '한국어', en: '영어', zh: '중국어', ja: '일본어' }[data.lang] || data.lang;
+                a.download = (data.company.name || 'kfish_시안') + '_' + langLabel + '.jpg';
                 a.click();
                 toast('이미지가 다운로드되었습니다!');
             }).catch(function() { toast('이미지 생성 실패'); })
