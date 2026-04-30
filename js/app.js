@@ -1218,7 +1218,8 @@ var App = (function() {
                 var a = document.createElement('a');
                 a.href = canvas.toDataURL('image/jpeg', preset.jpegQuality);
                 var langLabel = { ko: '한국어', en: '영어', zh: '중국어', ja: '일본어' }[data.lang] || data.lang;
-                a.download = (data.company.name || 'kfish_시안') + '_' + langLabel + '.jpg';
+                var koName = (_textData.ko && _textData.ko.company_name) || data.company.name || 'kfish_시안';
+                a.download = koName + '_' + langLabel + '.jpg';
                 a.click();
                 toast('이미지가 다운로드되었습니다!');
             }).catch(function() { toast('이미지 생성 실패'); })
