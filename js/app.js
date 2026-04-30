@@ -1217,7 +1217,7 @@ var App = (function() {
             html2canvas(previewArea, { width: 900, scale: 1, useCORS: true, backgroundColor: null }).then(function(canvas) {
                 var a = document.createElement('a');
                 a.href = canvas.toDataURL('image/jpeg', preset.jpegQuality);
-                var langLabel = { ko: '한국어', en: '영어', zh: '중국어', ja: '일본어' }[data.lang] || data.lang;
+                var langLabel = LANG_LABELS[data.lang] || data.lang;
                 var koName = (_textData.ko && _textData.ko.company_name) || data.company.name || 'kfish_시안';
                 a.download = koName + '_' + langLabel + '.jpg';
                 a.click();
